@@ -106,11 +106,14 @@ def analyze_trace(trace, prev, backend, request, raw, request_of, profile):
         for p in prev[-8:]:
             if p not in cands:
                 cands.append(p)
+        # prefer a prompt this one extends (what the server can reuse whole), then the longest shared prefix,
+        # then the same session; later requests win ties
         best = None
         for p in cands:
             n = lcp_len(ids, p["ids"])
-            if best is None or n >= best[0]:
-                best = (n, p)
+            key = (n >= len(p["ids"]) - 2, n, bool(ci["session"]) and p.get("session_id") == ci["session"])
+            if best is None or key >= best[0]:
+                best = (key, p)
         parent = best[1]
         diff = diff_analysis(a, parent, request, request_of(parent["id"]))
         a["prev_id"] = prev[-1]["id"]

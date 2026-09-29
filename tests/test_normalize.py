@@ -52,8 +52,16 @@ def test_openai_cache_from_timings():
 
 
 def test_openai_timings_only():
-    u = N.normalize(oai({"completion_tokens": 3}, {"cache_n": 60, "prompt_n": 40, "predicted_n": 3}), 100)
-    assert u.total is None and u.output_tokens == 3
+    # stream without stream_options.include_usage: completion_tokens was estimated from the chunk count
+    raw = dict(oai({"completion_tokens": 5}, {"cache_n": 60, "prompt_n": 40, "predicted_n": 3}), output_tokens_estimated=True)
+    u = N.normalize(raw, 100)
+    assert (u.total, u.cached, u.uncached, u.output_tokens, u.output_estimated) == (100, 60, 40, 3, False)
+    assert exactness(u.to_dict(), 100)["usage"] is True
+
+
+def test_openai_nothing():
+    u = N.normalize(oai({"completion_tokens": 3}, None), 100)
+    assert u.total is None and u.cached is None and u.output_tokens == 3
 
 
 def test_openai_uncached_semantics_detected():

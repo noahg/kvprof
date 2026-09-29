@@ -2,7 +2,8 @@
 
 Anthropic: input_tokens is the uncached part, cache_read_input_tokens the reused part, their sum the prompt.
 OpenAI: prompt_tokens is the whole prompt; the cached part is prompt_tokens_details.cached_tokens or
-timings.cache_n; timings.prompt_n is what was prefilled.
+timings.cache_n; timings.prompt_n is what was prefilled. Streams carry `usage` only when the client sets
+stream_options.include_usage, but llama.cpp sends `timings` on the final chunk either way.
 """
 from ..base import Usage, UsageNormalizer
 
@@ -32,6 +33,8 @@ class LlamaCppUsageNormalizer(UsageNormalizer):
             u.decode_rate = tm.get("predicted_per_second")
         if raw.get("api") == "openai":
             pt = f.get("prompt_tokens")
+            if pt is None and tm.get("prompt_n") is not None and tm.get("cache_n") is not None:
+                pt = tm["prompt_n"] + tm["cache_n"]  # no usage block (client did not ask for it): llama.cpp timings still add up
             cached = (f.get("prompt_tokens_details") or {}).get("cached_tokens")
             if cached is None:
                 cached = tm.get("cache_n")
@@ -43,6 +46,8 @@ class LlamaCppUsageNormalizer(UsageNormalizer):
             elif pt is not None:
                 u.uncached = pt - (u.cached or 0)
             u.output_tokens = f.get("completion_tokens", tm.get("predicted_n"))
+            if raw.get("output_tokens_estimated") and tm.get("predicted_n") is not None:
+                u.output_tokens, u.output_estimated = tm["predicted_n"], False
             u.semantics = "total" if pt is not None else None
             if pt is not None and n_rendered is not None and pt != n_rendered and pt + (u.cached or 0) == n_rendered:
                 u.semantics, u.total, u.uncached = "uncached", n_rendered, pt

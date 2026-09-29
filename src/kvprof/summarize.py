@@ -59,10 +59,12 @@ def summary_line(a):
     if a["kind"] == "cold" or not d:
         what = (f"{n(a['n_tokens'])}-tok prompt (system {n(groups.get('system', 0))} / tools {n(groups.get('tools', 0))}"
                 f" / messages {n(groups.get('messages', 0))})")
-    elif d.get("end_extension"):
-        what = f"+{n(d['appended'])} tok appended after a {n(d['lcp'])}-tok shared prefix"
     elif a["kind"] == "retry":
         what = f"identical to #{a['parent_id'][-4:]} ({n(a['n_tokens'])} tok)"
+    elif d.get("end_extension"):
+        what = f"+{n(d['appended'])} tok appended after a {n(d['lcp'])}-tok shared prefix"
+    elif d.get("lcp") == d.get("cur_len"):
+        what = f"prefix of #{a['parent_id'][-4:]}: all {n(a['n_tokens'])} tok shared, its last {n(d['parent_dropped'])} tok dropped"
     else:
         fd = d.get("first_divergent") or {}
         ch = d.get("changed_text")

@@ -82,3 +82,30 @@ def test_diff_analysis_extension():
     ca = _an("c", "SYSTEM|hello again", 7)
     d = diff_analysis(ca, pa, None, None)
     assert d["end_extension"] and d["lcp"] == 12 and d["first_divergent"]["parent_section"] is None
+
+
+def test_parent_prefers_extension_over_longer_prefix(fake_upstream, tmp_path):
+    """A new session's tool round-trip must pair with its own previous prompt (which it extends), not with a
+    different conversation that happens to share a few more tokens."""
+    import json
+
+    from conftest import load_fixture_trace
+    from kvprof.analyze import Pipeline
+    from kvprof.config import Settings
+    d = tmp_path / "t"
+    d.mkdir()
+    cold, rt = load_fixture_trace("anthropic_cold"), load_fixture_trace("anthropic_tool_roundtrip")
+    seq = [("0001", cold, "s1"), ("0002", rt, "s1"), ("0003", cold, "s2"), ("0004", rt, "s2")]
+    for tag, tr, sess in seq:
+        tr = json.loads(json.dumps(tr))
+        tr["id"] = f"20260101-000000.000-{tag}"
+        tr["seq"] = int(tag)
+        tr["request"]["headers"]["x-claude-code-session-id"] = sess
+        if tag == "0004":  # the second session read a different file: shares more with #2 than #3's whole prompt
+            tr["request"]["body"]["messages"][2]["content"][0]["content"] = "buy milk\nfix the build\nand something else entirely"
+        (d / (tr["id"] + ".json")).write_text(json.dumps(tr))
+    p = Pipeline(Settings(upstream=fake_upstream.url, trace_dir=str(d), use_log=False))
+    p.refresh_all()
+    a = p.analyses
+    assert [x["kind"] for x in a] == ["cold", "tool_roundtrip", "retry", "tool_roundtrip"]
+    assert a[2]["parent_id"] == a[0]["id"] and a[3]["parent_id"] == a[2]["id"]
