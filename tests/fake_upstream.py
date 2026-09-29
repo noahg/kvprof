@@ -310,8 +310,10 @@ class FakeUpstream:
         ev("message_start", {"type": "message_start", "message": {"id": "msg_fake", "type": "message", "role": "assistant",
                                                                   "model": "test-model", "content": [], "usage": dict(usage, output_tokens=0)}})
         ev("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+        delay = float(headers.get("x-fake-delay") or 0)
         for p in out:
             ev("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": p}})
+            time.sleep(delay)
         ev("content_block_stop", {"type": "content_block_stop", "index": 0})
         ev("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": len(out)}})
         ev("message_stop", {"type": "message_stop"})

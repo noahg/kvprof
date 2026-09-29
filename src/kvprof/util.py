@@ -30,6 +30,15 @@ def log(msg):
         print(msg, flush=True)
 
 
+def display_path(path):
+    """Relative to the working directory when it is below it, else absolute."""
+    try:
+        rel = os.path.relpath(path)
+    except ValueError:
+        return path
+    return os.path.abspath(path) if rel.startswith("..") else rel
+
+
 def load_json(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)

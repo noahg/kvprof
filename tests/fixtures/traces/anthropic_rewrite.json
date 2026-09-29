@@ -1,0 +1,175 @@
+{
+ "method": "POST",
+ "path": "/v1/messages",
+ "query": "",
+ "t_request": 1790725082.745337,
+ "seq": 3,
+ "id": "20260929-163802.745-0003",
+ "schema": 2,
+ "api": "anthropic",
+ "conn": 3,
+ "tap_pid": 3633,
+ "request": {
+  "headers": {
+   "accept-encoding": "identity",
+   "content-length": "696",
+   "content-type": "application/json",
+   "user-agent": "claude-cli/2.1.283 (external, cli)",
+   "x-claude-code-session-id": "fixture-session",
+   "connection": "close"
+  },
+  "body": {
+   "model": "test-model",
+   "max_tokens": 128,
+   "stream": true,
+   "system": "You are a coding agent.",
+   "tools": [
+    {
+     "name": "Read",
+     "description": "Read a file.",
+     "input_schema": {
+      "type": "object",
+      "properties": {
+       "file_path": {
+        "type": "string"
+       }
+      },
+      "required": [
+       "file_path"
+      ]
+     }
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "text",
+       "text": "Summarize notes.txt"
+      },
+      {
+       "type": "text",
+       "text": "<system-reminder>today is 2026-09-30</system-reminder>"
+      }
+     ]
+    },
+    {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_1",
+       "name": "Read",
+       "input": {
+        "file_path": "/w/notes.txt"
+       }
+      }
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_1",
+       "content": "buy milk\nfix the build"
+      }
+     ]
+    }
+   ]
+  },
+  "body_bytes": 696,
+  "body_sha256": "6ff4ead5de3f68ff0bd97b9ed29acae24cdde0523e642f14716dca3a4a87ee8c"
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "server": "BaseHTTP/0.6 Python/3.13.2",
+   "date": "Tue, 29 Sep 2026 23:38:02 GMT",
+   "content-type": "text/event-stream",
+   "transfer-encoding": "chunked"
+  },
+  "sse_lines": [
+   "event: message_start",
+   "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_fake\", \"type\": \"message\", \"role\": \"assistant\", \"model\": \"test-model\", \"content\": [], \"usage\": {\"input_tokens\": 101, \"cache_read_input_tokens\": 211, \"output_tokens\": 0}}}",
+   "",
+   "event: content_block_start",
+   "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"Hello\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \" \"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"from\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \" \"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"the\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \" \"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"fake\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \" \"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"server\"}}",
+   "",
+   "event: content_block_delta",
+   "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \".\"}}",
+   "",
+   "event: content_block_stop",
+   "data: {\"type\": \"content_block_stop\", \"index\": 0}",
+   "",
+   "event: message_delta",
+   "data: {\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"end_turn\"}, \"usage\": {\"output_tokens\": 10}}",
+   "",
+   "event: message_stop",
+   "data: {\"type\": \"message_stop\"}",
+   ""
+  ],
+  "body_text": null,
+  "bytes": 1881,
+  "complete": true,
+  "outcome": "ok"
+ },
+ "timing": {
+  "t_request": 1790725082.745337,
+  "t_request_body_complete": 1790725082.745337,
+  "t_response_headers": 1790725082.7471092,
+  "t_first_event": 1790725082.747324,
+  "t_message_start": 1790725082.747324,
+  "t_first_delta": 1790725082.747324,
+  "t_first_text_delta": 1790725082.747324,
+  "t_last_byte": 1790725082.747587,
+  "ttft_s": 0.002,
+  "total_s": 0.0022
+ },
+ "usage": {
+  "api": "anthropic",
+  "fields": {
+   "input_tokens": 101,
+   "cache_read_input_tokens": 211,
+   "output_tokens": 10
+  },
+  "timings": null,
+  "stop_reason": "end_turn",
+  "model": "test-model",
+  "n_deltas": 10,
+  "n_text_deltas": 10,
+  "output_tokens_estimated": false
+ },
+ "stop_reason": "end_turn",
+ "outcome": "ok",
+ "model": "test-model",
+ "stream": true
+}

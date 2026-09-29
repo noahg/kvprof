@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claudelocal trace</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e2e2dd; --line2: #cfcfc8;
+  --accent: #2f6fdb; --sel: #eef3fd; --hover: #f3f3f0; --soft: #f1f1ee; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --k-cold: #d64545; --k-warm: #5aa7a0; --k-main_turn: #2f6fdb; --k-tool_roundtrip: #2f9e5b; --k-side: #8a6fd1; --k-rewrite: #e2891b;
+  --k-compaction: #b5651d; --k-retry: #8a8a85; --k-inflight: #9a9a94;
+  --reused: #c9c9c2; --prefilled: #f0a23a; --shared: #4caf50; --tail: #e05252; --tok-a: rgba(47,111,219,.10); --tok-b: rgba(47,111,219,.20);
+  --good: #2f9e5b; --warnc: #e2891b; --bad: #d64545;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151614; --panel: #1d1e1b; --ink: #e8e8e3; --muted: #9a9a93; --line: #2c2d29; --line2: #3b3c37; --sel: #22304a; --hover: #24251f; --soft: #232420;
+          --reused: #4a4a45; --tok-a: rgba(110,160,255,.14); --tok-b: rgba(110,160,255,.26); }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+a { color: var(--accent); }
+header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+header .sub { color: var(--muted); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #aaa; margin-right: 4px; vertical-align: -1px; }
+.dot.live { background: #2f9e5b; box-shadow: 0 0 0 3px rgba(47,158,91,.2); }
+label.toggle { color: var(--muted); cursor: pointer; margin-left: auto; white-space: nowrap; }
+main { display: grid; grid-template-columns: minmax(600px, 1.45fr) minmax(380px, 1fr); gap: 0; height: calc(100vh - 42px); }
+#left { overflow: auto; border-right: 1px solid var(--line); }
+#detail { overflow: auto; background: var(--panel); }
+/* prose blocks */
+details.intro { margin: 10px 14px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+details.intro summary { cursor: pointer; padding: 8px 12px; font-weight: 600; list-style: none; display: flex; align-items: center; gap: 8px; }
+details.intro summary::before { content: "▸"; color: var(--muted); font-weight: 400; }
+details.intro[open] summary::before { content: "▾"; }
+details.intro .body { padding: 0 14px 12px; max-width: 78ch; }
+details.intro p { margin: 6px 0; }
+.cap { color: var(--muted); font-size: 12px; margin: 0 0 6px; max-width: 90ch; }
+.cap b { color: var(--ink); font-weight: 600; }
+section.block { padding: 12px 14px 6px; }
+section.block h2 { font-size: 12.5px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+abbr[title] { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+/* session summary tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 8px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .l { color: var(--muted); font-size: 11.5px; }
+.tile .s { font-size: 11.5px; margin-top: 2px; }
+.takeaway { background: var(--soft); border-radius: 8px; padding: 8px 12px; margin: 4px 0 6px; max-width: 100ch; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+.chip { border: 1px solid var(--line2); border-radius: 12px; padding: 1px 9px; cursor: pointer; user-select: none; color: var(--muted); }
+.chip.on { color: var(--ink); border-color: currentColor; }
+.chip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+/* gantt */
+#gantt { width: 100%; display: block; }
+#gantt rect.bar { cursor: pointer; }
+#gantt rect.bar.sel { stroke: var(--ink); stroke-width: 1.5; }
+#gantt text { fill: var(--muted); font-size: 10px; }
+#gantt line.axis { stroke: var(--line2); }
+/* table */
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 3px 6px; font-size: 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-weight: 500; font-size: 11.5px; z-index: 1; cursor: help; }
+th small { display: block; font-weight: 400; font-size: 10px; color: var(--muted); }
+td.l, th.l { text-align: left; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.sel { background: var(--sel); }
+tbody tr.dim td { opacity: .55; }
+tbody tr.grp td { background: var(--soft); color: var(--ink); font-weight: 600; text-align: left; padding: 6px 8px; cursor: pointer; border-top: 2px solid var(--line2); }
+tbody tr.grp td span.d { font-weight: 400; color: var(--muted); margin-left: 8px; }
+.chips label { color: var(--muted); cursor: pointer; margin-left: auto; }
+.kind { display: inline-block; padding: 0 6px; border-radius: 3px; color: #fff; font-size: 11px; font-weight: 600; cursor: help; }
+.kind.k-cold { background: var(--k-cold); } .kind.k-warm { background: var(--k-warm); } .kind.k-main_turn { background: var(--k-main_turn); } .kind.k-tool_roundtrip { background: var(--k-tool_roundtrip); }
+.kind.k-side { background: var(--k-side); } .kind.k-rewrite { background: var(--k-rewrite); } .kind.k-compaction { background: var(--k-compaction); }
+.kind.k-retry { background: var(--k-retry); } .kind.k-inflight { background: var(--k-inflight); } .kind.k-client_disconnect, .kind.k-http_error, .kind.k-upstream_closed { background: #666; }
+.pbar { display: inline-block; height: 10px; width: 90px; position: relative; vertical-align: middle; border-radius: 2px; overflow: hidden; background: transparent; }
+.pbar i { position: absolute; top: 0; bottom: 0; }
+.pbar .re { background: var(--reused); } .pbar .pf { background: var(--prefilled); } .pbar .dv { background: var(--tail); width: 2px; }
+.legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; flex-wrap: wrap; margin: 6px 0 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--muted); }
+.good { color: var(--good); } .warn { color: var(--warnc); } .bad { color: var(--bad); }
+/* detail */
+.dhead { padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
+.dhead .title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dhead .title .kind { font-size: 11px; }
+.explain { margin: 8px 0 0; max-width: 90ch; }
+.explain p { margin: 5px 0; }
+.explain .verdict { font-weight: 600; }
+.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 2; }
+.tab { padding: 5px 12px; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: var(--muted); }
+.tab.on { color: var(--ink); border-color: var(--line); background: var(--panel); margin-bottom: -1px; }
+.panel { padding: 12px 14px 40px; }
+.panel .intro { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; max-width: 90ch; }
+.panel .intro b { color: var(--ink); font-weight: 600; }
+.summary { font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; word-break: break-word; padding: 8px 10px; background: var(--bg); border-radius: 6px; margin: 10px 0; color: var(--muted); }
+.stack { display: flex; height: 16px; border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+.stack div { min-width: 1px; }
+.g-system { background: #5b8def; } .g-tools { background: #f0a23a; } .g-messages { background: #3fb36b; } .g-generation_prompt { background: #999; }
+.tree { font-size: 12.5px; }
+.node { display: grid; grid-template-columns: 18px minmax(120px, 1fr) 70px 52px 68px 62px 120px; align-items: center; padding: 2px 4px; border-radius: 4px; }
+.node:hover { background: var(--hover); }
+.node .car { color: var(--muted); cursor: pointer; width: 18px; }
+.node .lab { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.node .lab:hover { text-decoration: underline; }
+.node .num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 11.5px; }
+.node .mini { height: 8px; background: var(--line); border-radius: 2px; margin-left: 10px; overflow: hidden; }
+.node .mini i { display: block; height: 100%; background: var(--accent); }
+.node .prev { grid-column: 2 / -1; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 2px; }
+.kids { margin-left: 18px; border-left: 1px dashed var(--line); padding-left: 4px; }
+.hdr { display: grid; grid-template-columns: 18px minmax(120px, 1fr) 70px 52px 68px 62px 120px; color: var(--muted); font-size: 11px; padding: 0 4px 4px; }
+.hdr span:nth-child(n+3) { text-align: right; }
+.hdr span[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+.btn { border: 1px solid var(--line2); background: var(--panel); color: var(--ink); border-radius: 5px; padding: 2px 9px; cursor: pointer; font-size: 12px; }
+.btn.on { background: var(--sel); border-color: var(--accent); }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+select { font: inherit; background: var(--panel); color: var(--ink); border: 1px solid var(--line2); border-radius: 5px; padding: 2px 6px; max-width: 100%; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+.note { background: var(--soft); border-radius: 6px; padding: 8px 10px; margin: 8px 0; max-width: 90ch; }
+/* tokens */
+#tokwrap { font-family: var(--mono); font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+.tok { border-radius: 2px; padding: 1px 0; }
+.tok:nth-child(odd) { background: var(--tok-a); } .tok:nth-child(even) { background: var(--tok-b); }
+.tok:hover { outline: 1px solid var(--accent); }
+.tok.divg { outline: 2px solid var(--tail); background: rgba(224,82,82,.25); }
+.tok.nl::after { content: "↵"; color: var(--muted); }
+.chunk.ph { color: var(--muted); font-style: italic; }
+#tip { position: fixed; pointer-events: none; background: var(--ink); color: var(--bg); padding: 3px 7px; border-radius: 4px; font: 11px var(--mono); z-index: 20; display: none; white-space: nowrap; }
+/* diff */
+.dbar { position: relative; height: 18px; border-radius: 3px; overflow: hidden; background: var(--line); margin: 6px 0; }
+.dbar .sh { position: absolute; top: 0; bottom: 0; left: 0; background: var(--shared); }
+.dbar .tl { position: absolute; top: 0; bottom: 0; background: var(--tail); }
+.dbar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(0,0,0,.35); }
+.ctx { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.ctx pre { margin: 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11.5px; max-height: 260px; overflow: auto; }
+.ctx b { background: rgba(224,82,82,.3); font-weight: 600; }
+.ctx .capt { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
+pre.raw { margin: 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11.5px; max-height: 70vh; overflow: auto; }
+.empty { color: var(--muted); padding: 30px; text-align: center; max-width: 60ch; margin: 0 auto; }
+kbd { font: 11px var(--mono); border: 1px solid var(--line2); border-radius: 3px; padding: 0 4px; }
+dl.gloss { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0 0; }
+dl.gloss dt { font-weight: 600; white-space: nowrap; }
+dl.gloss dd { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>claudelocal trace</h1>
+  <span class="sub">what your coding agents send to the local model, and what each request costs</span>
+  <span class="sub" id="hmeta"><span class="dot" id="dot"></span>connecting…</span>
+  <label class="toggle"><input type="checkbox" id="follow" checked> follow newest request</label>
+</header>
+<main>
+  <section id="left">
+    <details class="intro" id="howto">
+      <summary>How to read this page</summary>
+      <div class="body">
+        <p>Every time a coding agent (Claude Code, OpenCode, …) needs the model it sends the <b>whole conversation as one prompt</b>: the system prompt, every tool definition, and all messages so far. For this session that is roughly 30–40K tokens per request.</p>
+        <p>The server keeps the last prompt it processed. If the new prompt <b>starts with exactly the same tokens</b>, it reuses that work and only computes ("prefills") the new tail. Time to first token is almost entirely prefill time, so the question for every request is: <b>how much was new, and why?</b></p>
+        <p>The <b>request list</b> answers it at a glance (grey = reused, orange = computed fresh), grouped by conversation when several agents or sessions share the server. Click a request: the panel on the right explains it in words, <b>What's in the prompt</b> shows what the tokens are, <b>Why it cost this</b> shows where the prompt first differs from the previous one, and <b>Tokens</b> shows the exact tokens the model read.</p>
+        <p>One rule to remember for this model (Qwen3-Coder-Next, a hybrid DeltaNet model): reuse works only when the new prompt <b>extends</b> the previous one. Normal turns and tool results do that. Anything that changes an earlier message costs a re-prefill from the last checkpoint.</p>
+        <details><summary style="padding:4px 0;font-weight:500">Glossary</summary>
+          <dl class="gloss">
+            <dt>token</dt><dd>the unit the model reads; ~4 characters of English, fewer for code and JSON.</dd>
+            <dt>prefill</dt><dd>processing prompt tokens before the first output token; ~250–350 tokens/s on this Mac, so 30K fresh tokens ≈ 100 s.</dd>
+            <dt>reused / cache_read</dt><dd>prompt tokens the server already had processed for an earlier request and did not compute again.</dd>
+            <dt>TTFT</dt><dd>time to first token: from sending the request until the first piece of the answer arrived. Includes prefill and any waiting for the GPU.</dd>
+            <dt>decode</dt><dd>generating the answer, token by token; ~30–40 tokens/s here.</dd>
+            <dt>slot</dt><dd>one conversation's cached state on the server. This server has two, so a small side request need not evict the main conversation.</dd>
+            <dt>LCP / LRU</dt><dd>how the server picked a slot: LCP = it found a slot whose cached prompt shares a prefix with the new one (the fraction kept is <i>f_keep</i>); LRU = nothing matched, it took the least recently used slot and started from scratch.</dd>
+            <dt>end-extension</dt><dd>a prompt that is the previous prompt plus new tokens at the end. The cheap case.</dd>
+            <dt>tool round-trip</dt><dd>Claude Code sending a tool's result back to the model; an end-extension whose cost is the size of the result.</dd>
+            <dt>template overhead</dt><dd>tokens added by the chat template (XML around tool schemas, turn markers) on top of the raw text Claude Code sent.</dd>
+          </dl>
+        </details>
+      </div>
+    </details>
+
+    <section class="block" id="sess">
+      <h2>This session</h2>
+      <div class="tiles" id="tiles"></div>
+      <div class="takeaway" id="takeaway"></div>
+    </section>
+
+    <section class="block">
+      <h2>Timeline</h2>
+      <p class="cap">When each request ran, one lane per server slot. Bar length is wall time; the darker start of a bar is the wait for the first token (mostly prefill). Bars that overlap were sharing the GPU, which slows both. Click a bar to select it.</p>
+      <svg id="gantt" height="10"></svg>
+    </section>
+
+    <section class="block">
+      <h2>Requests</h2>
+      <p class="cap">One row per request that reached the tap. When several conversations (sessions of Claude Code, OpenCode, or other clients) share the server, rows are grouped by conversation; click a group row to fold it, or untick "group by conversation" for a single timeline. Anything sent by a script rather than an agent (curl, bin/bench.py) is marked "via …". The bar shows the prompt: <b>grey</b> is what the server reused, <b>orange</b> is what it computed fresh (this is what you wait for). Hover a column title or a kind badge for its meaning; <kbd>j</kbd>/<kbd>k</kbd> move the selection.</p>
+      <div class="chips" id="chips"></div>
+    </section>
+    <table id="reqs">
+      <thead><tr>
+        <th title="request number in the order the tap recorded them">#</th>
+        <th class="l" title="wall-clock time the request reached the tap">time</th>
+        <th class="l" title="what kind of request this was, judged by comparing its prompt with the previous ones (hover a badge)">kind</th>
+        <th class="l" title="grey: tokens reused from the server's cache; orange: tokens computed fresh; red tick: where the prompt first differed from the previous one">prompt<small>reused | fresh</small></th>
+        <th title="total tokens of the prompt the model read">prompt</th>
+        <th title="tokens the server already had (cache_read_input_tokens)">reused</th>
+        <th title="tokens computed fresh (from the server log); this drives time to first token">fresh</th>
+        <th title="time to first token, as seen by the client">TTFT</th>
+        <th title="server-side prefill time and speed for the fresh tokens">prefill</th>
+        <th title="generated tokens and generation speed">decode</th>
+        <th class="l" title="how the server chose its cache: LCP = matched a prefix (number = fraction of the slot kept); LRU = no match, started cold">cache</th>
+        <th class="l" title="first token that differs from the previous prompt and the section it is in; 'end' means the prompt only grew at the end">first change</th>
+        <th class="l" title="cross-checks: 'exact' = our rendering of the prompt has exactly the server's token count; log status = how confidently the server-log task was matched">check</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">No requests yet. Start <span class="mono">bin/tap.py</span>, then run <span class="mono">LOCAL_LLM_URL=http://localhost:8083 claudelocal</span>. Requests appear here as they happen.</div>
+  </section>
+
+  <aside id="detail">
+    <div class="dhead" id="dhead"><div class="empty">Select a request on the left to see what it contained and why it cost what it did.</div></div>
+    <div class="tabs" id="tabs" hidden>
+      <div class="tab on" data-tab="budget">What's in the prompt</div>
+      <div class="tab" data-tab="diff">Why it cost this</div>
+      <div class="tab" data-tab="tokens">Tokens</div>
+      <div class="tab" data-tab="raw">Raw data</div>
+    </div>
+    <div class="panel" id="panel"></div>
+  </aside>
+</main>
+<div id="tip"></div>
+<script>
+(() => {
+const KINDS = ["cold", "warm", "main_turn", "tool_roundtrip", "side", "rewrite", "compaction", "retry"];
+const KIND_INFO = {
+  cold: ["cold start", "Nothing in the server's cache matched this prompt; every token was computed from scratch. Normal for the first turn of a session, after changing directory or model, or when both slots were taken by other conversations."],
+  warm: ["warm (unrecorded parent)", "The server reused most of this prompt from a request the tap did not record (for example one sent directly to the server)."],
+  main_turn: ["new turn", "A new user message. The prompt is the previous one plus the model's last answer and the new message, so the server reused everything it had."],
+  tool_roundtrip: ["tool round-trip", "Claude Code sent a tool's result back. The prompt is the previous one plus the tool call and its result; the cost is the size of that result."],
+  side: ["side request", "A small request without tools (session title, summaries, sub-agents). It uses a slot but does not touch the main conversation on this two-slot server."],
+  rewrite: ["rewrite", "Something before the end of the prompt changed (an earlier message was edited or a reminder injected). The server could only reuse up to the change, or up to the last checkpoint before it."],
+  compaction: ["compaction", "Claude Code replaced the conversation with a shorter summary; the prompt differs from the previous one inside the messages and is shorter."],
+  retry: ["retry", "The same prompt sent again."],
+  inflight: ["in flight", "The server is processing this request right now."],
+  client_disconnect: ["cancelled", "Claude Code closed the connection before the answer finished (Escape, a timeout, or a superseded request); the server cancelled the task."],
+  http_error: ["rejected", "The server answered with an HTTP error (most often: the prompt does not fit the context window)."],
+  upstream_closed: ["server closed", "The server closed the connection before the answer was complete."],
+};
+const S = { reqs: [], byId: {}, etag: null, selected: null, follow: true, filters: new Set(KINDS), clients: null, group: true, collapsed: new Set(), tab: "budget",
+            detail: null, rawMode: false, tokSection: null, tokDiv: null, diffOther: null, meta: {}, live: false, open: new Set(["system", "tools", "messages"]) };
+const $ = (s, el = document) => el.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "html") e.innerHTML = v; else e.setAttribute(k, v); }
+  for (const k of kids) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+};
+const fmt = n => (n == null ? "–" : Number(n).toLocaleString());
+const fs = (n, d = 1) => (n == null ? "–" : Number(n).toFixed(d) + " s");
+const hms = t => (t ? new Date(t * 1000).toLocaleTimeString([], { hour12: false }) : "–");
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const kindOf = r => (r.outcome && r.outcome !== "ok" ? r.outcome : r.kind);
+const kindLabel = r => (KIND_INFO[kindOf(r)] || [kindOf(r)])[0];
+const kindHelp = r => (KIND_INFO[kindOf(r)] || ["", ""])[1];
+const AGENTS = ["Claude Code", "OpenCode"];
+const clientLabel = r => `${r.client_name || "unknown client"}${r.client_version ? " " + r.client_version : ""}`;
+const sessShort = r => (r.session_id || "?").slice(0, 8);
+const sessLabel = r => r.session_inferred ? `conversation ${sessShort(r)} (inferred from the prompt)` : `session ${sessShort(r)}`;
+const sessionsOf = list => { const m = new Map(); for (const r of list) { const k = r.session_id || r.id; if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
+const secName = id => {
+  if (!id) return "?";
+  if (id === "system.text") return "the system prompt";
+  if (id.startsWith("tool:")) return `the ${id.slice(5)} tool definition`;
+  if (id.startsWith("tools.")) return "the tools block";
+  const m = id.match(/^msg\[(\d+)\](?:\.block\[(\d+)\])?/);
+  if (m) return `message ${+m[1] + 1}${m[2] != null ? ", block " + (+m[2] + 1) : ""}`;
+  return id;
+};
+
+// remember whether the intro was collapsed
+try { const h = $("#howto"); h.open = localStorage.getItem("trace.howto") !== "closed"; h.addEventListener("toggle", () => localStorage.setItem("trace.howto", h.open ? "open" : "closed")); } catch (e) { $("#howto").open = true; }
+
+// ---------------------------------------------------------------- polling
+async function poll() {
+  try {
+    const r = await fetch("/api/requests", { headers: S.etag ? { "If-None-Match": S.etag } : {} });
+    if (r.status === 304) { setLive(true); return; }
+    if (!r.ok) throw new Error(r.status);
+    S.etag = r.headers.get("ETag");
+    const d = await r.json();
+    S.meta = d;
+    const prev = S.selected && S.byId[S.selected] ? S.byId[S.selected] : null;
+    S.reqs = d.requests; S.byId = Object.fromEntries(d.requests.map(x => [x.id, x]));
+    setLive(true);
+    renderHeader(); renderSession(); renderGantt(); renderTable();
+    if (S.follow && S.reqs.length) {
+      const last = S.reqs[S.reqs.length - 1].id;
+      if (last !== S.selected) select(last, false);
+    }
+    const cur = S.selected && S.byId[S.selected];
+    if (cur && prev && (cur.stage !== prev.stage || cur.log_match !== prev.log_match || cur.kind !== prev.kind)) loadDetail(S.selected);
+  } catch (e) { setLive(false); }
+}
+function setLive(on) { S.live = on; const d = $("#dot"); if (d) d.className = "dot" + (on ? " live" : ""); }
+
+// ---------------------------------------------------------------- header / session summary
+function renderHeader() {
+  const m = S.meta;
+  const anchor = m.anchor ? `server log aligned via ${m.anchor_src}` : "server log not aligned";
+  $("#hmeta").innerHTML = `<span class="dot${S.live ? " live" : ""}" id="dot"></span>${esc(m.model || "?")} · ${anchor}`;
+}
+function renderSession() {
+  const tiles = $("#tiles"), tk = $("#takeaway");
+  tiles.innerHTML = ""; tk.innerHTML = "";
+  const all = visible();
+  const ok = all.filter(r => r.outcome === "ok" && r.t_request);
+  if (!S.reqs.length) { $("#sess").style.display = "none"; return; }
+  $("#sess").style.display = "";
+  const filtered = all.length !== S.reqs.length;
+  $("#sess h2").textContent = filtered ? `Overview (${all.length} of ${S.reqs.length} requests shown)` : "Overview";
+  const sessions = sessionsOf(all), clients = new Set(all.map(r => r.client_name));
+  if (!all.length) { tk.textContent = "Nothing matches the current filters."; return; }
+  const t0 = Math.min(...all.map(r => r.t_request || Infinity)), t1 = Math.max(...all.map(r => r.t_last_byte || r.t_request || 0));
+  const wall = Math.max(0, t1 - t0);
+  const pp = ok.reduce((a, r) => a + (r.pp_s || 0), 0), fresh = ok.reduce((a, r) => a + (r.prefilled || 0), 0), reused = ok.reduce((a, r) => a + (r.reused || r.cache_read || 0), 0);
+  const dec = ok.reduce((a, r) => a + ((r.tg_tokens || r.output_tokens || 0) / (r.tg_rate || 30)), 0);
+  const byKind = {}; for (const r of all) byKind[kindOf(r)] = (byKind[kindOf(r)] || 0) + 1;
+  const costly = ok.filter(r => (r.pp_s || 0) >= 5).sort((a, b) => (b.pp_s || 0) - (a.pp_s || 0));
+  const tile = (v, l, s) => el("div", { class: "tile" }, el("div", { class: "v" }, v), el("div", { class: "l" }, l), s ? el("div", { class: "s muted" }, s) : null);
+  tiles.append(
+    tile(all.length, "requests", Object.entries(byKind).map(([k, n]) => `${n} ${(KIND_INFO[k] || [k])[0]}`).join(", ")),
+    tile(sessions.size, sessions.size === 1 ? "conversation" : "conversations", [...clients].join(", ")),
+    tile(fmtDur(wall), "session wall time", `first request to last byte`),
+    tile(fmtDur(pp), "spent prefilling", wall ? `${Math.round(100 * pp / wall)}% of wall time` : ""),
+    tile(fmt(fresh), "tokens computed fresh", `${fmt(reused)} reused from cache (${fresh + reused ? Math.round(100 * reused / (fresh + reused)) : 0}%)`),
+    tile(fmtDur(dec), "spent generating", ""));
+  const parts = [];
+  if (costly.length) parts.push(`Most of the waiting was ${costly.length === 1 ? "one request" : costly.length + " requests"}: ${costly.slice(0, 3).map(r => `#${r.seq} (${kindLabel(r)}, ${fmt(r.prefilled)} fresh tokens, ${fs(r.pp_s, 0)})`).join(", ")}.`);
+  const cheap = ok.filter(r => (r.kind === "tool_roundtrip" || r.kind === "main_turn") && r.select === "LCP");
+  if (cheap.length) parts.push(`${cheap.length} follow-up ${cheap.length === 1 ? "request" : "requests"} (new turns and tool results) reused the cache and cost ${fs(cheap.reduce((a, r) => a + (r.pp_s || 0), 0), 1)} of prefill in total.`);
+  const rw = all.filter(r => r.kind === "rewrite" || r.kind === "compaction");
+  if (rw.length) parts.push(`${rw.length} ${rw.length === 1 ? "request" : "requests"} changed an earlier part of the prompt and had to re-prefill from there: ${rw.map(r => "#" + r.seq).join(", ")}.`);
+  const conc = ok.filter(r => r.concurrent_with && r.concurrent_with.length);
+  if (conc.length) parts.push(`${conc.length} ${conc.length === 1 ? "request" : "requests"} overlapped in time with another one and shared the GPU.`);
+  tk.textContent = parts.join(" ") || "Waiting for the first request to finish.";
+}
+const fmtDur = s => { if (s == null) return "–"; if (s < 90) return `${s.toFixed(s < 10 ? 1 : 0)} s`; const t = Math.round(s); return `${Math.floor(t / 60)} min ${t % 60} s`; };
+function renderChips() {
+  const chips = $("#chips"); chips.innerHTML = "";
+  const cc = {}; for (const r of S.reqs) cc[r.client_name || "?"] = (cc[r.client_name || "?"] || 0) + 1;
+  if (Object.keys(cc).length > 1) {
+    chips.append(el("span", { class: "muted" }, "clients:"));
+    for (const [c, n] of Object.entries(cc)) chips.append(el("span", { class: "chip" + (!S.clients || S.clients.has(c) ? " on" : ""), onclick: () => { if (!S.clients) S.clients = new Set(Object.keys(cc)); S.clients.has(c) ? S.clients.delete(c) : S.clients.add(c); if (S.clients.size === Object.keys(cc).length) S.clients = null; renderAll(); } }, `${c} ${n}`));
+  }
+  const counts = {}; for (const r of S.reqs) counts[r.kind] = (counts[r.kind] || 0) + 1;
+  const sess = sessionsOf(S.reqs);
+  const lab = el("label", {}, el("input", { type: "checkbox", onchange: e => { S.group = e.target.checked; renderTable(); } }), " group by conversation");
+  lab.querySelector("input").checked = S.group;
+  if (sess.size > 1) chips.append(lab);
+  if (Object.keys(counts).length < 2) return;
+  chips.append(el("span", { class: "muted", style: Object.keys(cc).length > 1 ? "margin-left:10px" : "" }, "kinds:"));
+  for (const k of KINDS) {
+    if (!counts[k]) continue;
+    chips.append(el("span", { class: "chip" + (S.filters.has(k) ? " on" : ""), title: KIND_INFO[k][1], onclick: () => { S.filters.has(k) ? S.filters.delete(k) : S.filters.add(k); renderAll(); } },
+      el("i", { style: `background: var(--k-${k})` }), `${KIND_INFO[k][0]} ${counts[k]}`));
+  }
+}
+function renderAll() { renderSession(); renderGantt(); renderTable(); }
+$("#follow").addEventListener("change", e => { S.follow = e.target.checked; if (S.follow && S.reqs.length) select(S.reqs[S.reqs.length - 1].id, false); });
+
+// ---------------------------------------------------------------- gantt
+function visible() { return S.reqs.filter(r => S.filters.has(r.kind) && (!S.clients || S.clients.has(r.client_name))); }
+function renderGantt() {
+  const svg = $("#gantt"); svg.innerHTML = "";
+  const reqs = visible().filter(r => r.t_request);
+  if (!reqs.length) { svg.setAttribute("height", 10); return; }
+  const now = Date.now() / 1000;
+  const t0 = Math.min(...reqs.map(r => r.t_request));
+  const t1 = Math.max(...reqs.map(r => r.t_last_byte || now));
+  const W = svg.clientWidth || 800, padL = 44, padR = 10, laneH = 22, axisH = 18;
+  const lanes = ["slot 0", "slot 1", "no log"];
+  const laneOf = r => (r.slot == null ? 2 : Math.min(r.slot, 1));
+  const usedLanes = new Set(reqs.map(laneOf));
+  const laneIdx = {}; let li = 0; for (let i = 0; i < 3; i++) if (usedLanes.has(i)) laneIdx[i] = li++;
+  const H = li * laneH + axisH + 6;
+  svg.setAttribute("height", H);
+  const x = t => padL + (W - padL - padR) * ((t - t0) / Math.max(1e-6, t1 - t0));
+  const ns = "http://www.w3.org/2000/svg";
+  const mk = (tag, a) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+  for (const [i, idx] of Object.entries(laneIdx)) {
+    const t = mk("text", { x: 2, y: idx * laneH + 15 }); t.textContent = lanes[i]; svg.append(t);
+    svg.append(mk("line", { class: "axis", x1: padL, x2: W - padR, y1: (idx + 1) * laneH - .5, y2: (idx + 1) * laneH - .5 }));
+  }
+  const span = t1 - t0; const step = span > 1200 ? 300 : span > 300 ? 60 : span > 60 ? 15 : 5;
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+    const tx = mk("text", { x: x(t), y: H - 4, "text-anchor": "middle" }); tx.textContent = hms(t); svg.append(tx);
+    svg.append(mk("line", { class: "axis", x1: x(t), x2: x(t), y1: 0, y2: li * laneH, "stroke-dasharray": "2,3" }));
+  }
+  for (const r of reqs) {
+    const y = laneIdx[laneOf(r)] * laneH + 3, end = r.t_last_byte || now;
+    const x0 = x(r.t_request), x1 = Math.max(x0 + 2, x(end));
+    const g = mk("g", {});
+    const color = `var(--k-${kindOf(r) === "inflight" ? "inflight" : (r.outcome && r.outcome !== "ok") ? "retry" : r.kind})`;
+    const selSess = S.selected && S.byId[S.selected] ? S.byId[S.selected].session_id : null;
+    const dim = selSess && sessionsOf(reqs).size > 1 && r.session_id !== selSess;
+    const bar = mk("rect", { class: "bar" + (r.id === S.selected ? " sel" : ""), x: x0, y, width: x1 - x0, height: laneH - 6, rx: 2, fill: color, opacity: dim ? .25 : r.outcome === "ok" ? .9 : .55 });
+    bar.addEventListener("click", () => select(r.id, true));
+    const tt = mk("title", {}); tt.textContent = `#${r.seq} ${kindLabel(r)} · ${clientLabel(r)}, ${sessLabel(r)} · ${fmt(r.prefilled)} fresh tokens, TTFT ${fs(r.ttft_s)}`; bar.append(tt);
+    g.append(bar);
+    if (r.t_first_delta) g.append(mk("rect", { x: x0, y, width: Math.max(0, x(r.t_first_delta) - x0), height: laneH - 6, rx: 2, fill: "rgba(0,0,0,.25)", "pointer-events": "none" }));
+    svg.append(g);
+  }
+}
+window.addEventListener("resize", renderGantt);
+
+// ---------------------------------------------------------------- table
+function renderTable() {
+  renderChips();
+  const tb = $("#rows"); tb.innerHTML = "";
+  const reqs = visible();
+  $("#empty").style.display = S.reqs.length ? "none" : "";
+  $("#reqs").style.display = S.reqs.length ? "" : "none";
+  const maxP = Math.max(1, ...S.reqs.map(r => r.prompt_tokens || 0));
+  const sessions = sessionsOf(reqs);
+  const multiClient = new Set(S.reqs.map(r => r.client_name)).size > 1;
+  const grouped = S.group && sessions.size > 1;
+  const order = grouped ? [...sessions.values()].flat() : reqs;
+  let lastSess = null;
+  for (const r of order) {
+    const sk = r.session_id || r.id;
+    if (grouped && sk !== lastSess) {
+      lastSess = sk;
+      const g = sessions.get(sk), okg = g.filter(x => x.outcome === "ok");
+      const cold = okg.filter(x => x.kind === "cold" || x.kind === "warm").reduce((a, x) => a + (x.pp_s || 0), 0), rest = okg.filter(x => x.kind !== "cold" && x.kind !== "warm").reduce((a, x) => a + (x.pp_s || 0), 0);
+      const collapsed = S.collapsed.has(sk);
+      const td = el("td", { colspan: 13 }, `${collapsed ? "▸" : "▾"} ${clientLabel(r)} · ${sessLabel(r)}`,
+        el("span", { class: "d" }, `started ${hms(g[0].t_request)} · ${g.length} request${g.length === 1 ? "" : "s"}` + (okg.length ? ` · ${fs(cold, 0)} of cold prefill, ${fs(rest, 1)} for follow-ups` : "")));
+      tb.append(el("tr", { class: "grp", onclick: () => { collapsed ? S.collapsed.delete(sk) : S.collapsed.add(sk); renderTable(); } }, td));
+      if (collapsed) continue;
+    } else if (grouped && S.collapsed.has(sk)) continue;
+    const reused = r.reused ?? (r.cache_read || 0), pref = r.prefilled ?? ((r.prompt_tokens || 0) - reused);
+    const bar = el("span", { class: "pbar" },
+      el("i", { class: "re", style: `left:0;width:${100 * reused / maxP}%` }),
+      el("i", { class: "pf", style: `left:${100 * reused / maxP}%;width:${100 * Math.max(0, pref) / maxP}%` }));
+    if (r.diverge_tok != null && !(r.lcp >= r.parent_len - 2)) bar.append(el("i", { class: "dv", style: `left:${100 * r.diverge_tok / maxP}%` }));
+    const sel = r.select === "LCP" ? `hit ${r.f_keep != null ? Math.round(r.f_keep * 100) + "%" : ""}` : r.select === "LRU" ? "cold" : "–";
+    const div = r.diverge_tok == null ? (r.parent_id ? "end" : "–") : (r.lcp >= r.parent_len - 2 ? "end" : `@${fmt(r.diverge_tok)} ${secName(r.diverge_section).replace("message ", "msg ").replace(", block ", ".")}`);
+    let chk = "";
+    if (r.exact === true) chk = `<span class="good" title="our rendering of the prompt has exactly the server's token count">exact</span>`; else if (r.exact === false) chk = `<span class="bad" title="the rendered prompt's token count differs from the server's; sections may be slightly off">count differs</span>`; else chk = `<span class="muted">–</span>`;
+    if (r.log_match && r.log_match !== "exact" && r.log_match !== "none") chk += ` <span class="warn" title="the server-log task was matched by time rather than by exact token counts">log ${r.log_match}${r.residual_pp != null ? " " + (r.residual_pp > 0 ? "+" : "") + r.residual_pp : ""}</span>`;
+    if (r.log_match === "none") chk += ` <span class="muted" title="no server-log task could be matched; server-side numbers are missing">no log</span>`;
+    if (r.concurrent_with && r.concurrent_with.length) chk += ` <span class="muted" title="ran at the same time as ${r.concurrent_with.map(i => "#" + (S.byId[i] || {}).seq).join(", ")}, sharing the GPU">∥${r.concurrent_with.length}</span>`;
+    const tr = el("tr", { class: (r.id === S.selected ? "sel" : "") + (r.outcome !== "ok" ? " dim" : ""), onclick: () => select(r.id, true) },
+      el("td", {}, r.seq), el("td", { class: "l mono" }, hms(r.t_request)),
+      el("td", { class: "l" }, el("span", { class: `kind k-${kindOf(r)}`, title: kindHelp(r) }, kindLabel(r)),
+        multiClient && !grouped ? el("span", { class: "muted", title: `${clientLabel(r)}, ${sessLabel(r)}` }, ` ${r.client_name}`) : (!AGENTS.includes(r.client_name) ? el("span", { class: "muted", title: `sent by ${r.client}: a test or script, not a coding agent` }, ` via ${r.client_name}`) : (r.hint && r.kind === "side" ? el("span", { class: "muted" }, " " + r.hint.slice(0, 22)) : null))),
+      el("td", { class: "l" }, bar),
+      el("td", {}, fmt(r.prompt_tokens)), el("td", {}, fmt(reused)), el("td", {}, fmt(pref)),
+      el("td", {}, fs(r.ttft_s)), el("td", {}, r.pp_s != null ? `${fs(r.pp_s)} @ ${Math.round(r.pp_rate || 0)}` : "–"),
+      el("td", {}, r.tg_tokens != null ? `${fmt(r.tg_tokens)} @ ${(r.tg_rate || 0).toFixed(1)}` : (r.output_tokens != null ? fmt(r.output_tokens) : "–")),
+      el("td", { class: "l mono" }, sel), el("td", { class: "l" }, div), el("td", { class: "l", html: chk }));
+    tr.dataset.id = r.id;
+    tb.append(tr);
+  }
+}
+
+// ---------------------------------------------------------------- selection / detail
+async function select(id, user) {
+  if (user) { S.follow = false; $("#follow").checked = false; }
+  const keepSec = S.selected === id; S.selected = id; if (!keepSec) { S.tokSection = null; S.diffOther = null; }
+  setHash();
+  for (const tr of $("#rows").children) tr.classList.toggle("sel", tr.dataset.id === id);
+  for (const b of document.querySelectorAll("#gantt rect.bar")) b.classList.remove("sel");
+  const row = $(`#rows tr[data-id="${id}"]`); if (row && user !== false) row.scrollIntoView({ block: "nearest" });
+  renderGantt();
+  await loadDetail(id);
+}
+async function loadDetail(id) {
+  try { const r = await fetch(`/api/requests/${id}`); S.detail = await r.json(); } catch (e) { S.detail = null; }
+  if (S.detail && S.detail.id === S.selected) { renderHead(); renderPanel(); }
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => showTab(t.dataset.tab)));
+function showTab(name) { S.tab = name; document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === name)); setHash(); renderPanel(); }
+function setHash() { if (!S.selected) return; const h = S.selected + (S.tab !== "budget" || S.tokSection ? "/" + S.tab : "") + (S.tokSection ? "/" + encodeURIComponent(S.tokSection) : ""); if (location.hash.slice(1) !== h) history.replaceState(null, "", "#" + h); }
+
+// ---------------------------------------------------------------- plain-language explanation of one request
+function explain(d) {
+  const r = d.summary_row, out = [];
+  const k = kindOf(r), n = fmt, fresh = r.prefilled, reused = r.reused ?? r.cache_read, lg = d.log || {};
+  const cost = () => {
+    const bits = [];
+    if (r.ttft_s != null) bits.push(`The first token came back after ${fs(r.ttft_s)}`);
+    if (r.pp_s != null) bits.push(`of which ${fs(r.pp_s)} was prefill at ${Math.round(r.pp_rate || 0)} tokens/s`);
+    if (lg.queue_wait_s > 1) bits.push(`and ${fs(lg.queue_wait_s)} waiting for a free slot`);
+    if (r.tg_tokens != null) bits.push(`then ${n(r.tg_tokens)} tokens were generated at ${(r.tg_rate || 0).toFixed(0)} tokens/s`);
+    return bits.length ? (bits[0][0] === bits[0][0].toUpperCase() ? "" : "") + bits.join(", ") + "." : "";
+  };
+  if (k === "inflight") return [["", "The server is still working on this request. The prompt has been rendered and mapped below; the cost will fill in when the answer completes."]];
+  if (k === "http_error") return [["bad", `The server rejected this request (HTTP error). With ${n(r.prompt_tokens)} prompt tokens the usual reason is that it does not fit the ${fmt((S.meta.n_ctx || 131072))}-token context window.`]];
+  if (k === "client_disconnect") return [["warn", `${r.from_claude_code ? "Claude Code" : "The client"} closed the connection before the answer finished (after ${fs(r.total_s)}), so the server cancelled the task. The prompt had ${n(r.prompt_tokens)} tokens${r.output_tokens ? `; ${n(r.output_tokens)} tokens had been generated` : lg.pp_samples ? "; it was still prefilling" : ""}.`]];
+  if (k === "cold") {
+    out.push(["", `Nothing the server had cached matched this prompt, so all ${n(r.prompt_tokens)} tokens were computed from scratch.`]);
+    out.push(["", cost()]);
+    const sl = sessionsOf(S.reqs).get(r.session_id || r.id) || [];
+    const first = sl.length && sl[0].id === r.id;
+    out.push(["muted", first ? `This is the first request of this conversation (${clientLabel(r)}); the cold prefill is the normal price of starting one.` : r.parent_id ? `It shares only ${n(r.lcp)} tokens with the closest earlier request, so the server had nothing usable, probably because other conversations took both slots in between.` : "This is the first request the tap recorded; the cold prefill is the normal price of starting a session."]);
+  } else if (k === "warm") {
+    out.push(["", `The server reused ${n(reused)} of ${n(r.prompt_tokens)} tokens from a request the tap did not see (probably one sent directly to the server), and computed ${n(fresh)}.`]);
+    out.push(["", cost()]);
+  } else if (k === "tool_roundtrip" || k === "main_turn") {
+    const what = k === "tool_roundtrip" ? "the tool call and its result" : "the model's previous answer and the new user message";
+    out.push(["good", `This prompt is the previous one plus ${n(r.appended)} new tokens at the end (${what}), so the server reused ${n(reused)} tokens it already had and computed only ${n(fresh)}.`]);
+    out.push(["", cost()]);
+    if (fresh > 1500) out.push(["muted", `The fresh part is large: ${k === "tool_roundtrip" ? "a big tool result (a long file or command output) is the whole cost here. Smaller reads, or reading only the needed range, would shorten this wait." : "a long message was added."}`]);
+    else out.push(["muted", "This is the cheap case: the cache did its job."]);
+  } else if (k === "rewrite" || k === "compaction") {
+    const ch = r.changed_added || r.changed_removed;
+    out.push(["warn", `The prompt changed before its end: at token ${n(r.diverge_tok)}, in ${secName(r.diverge_section)}${r.changed_added && !r.changed_removed ? `, where this text was added: “${r.changed_added.trim().slice(0, 120)}”` : r.changed_removed && !r.changed_added ? `, where this text was removed: “${r.changed_removed.trim().slice(0, 120)}”` : ch ? " (text changed there)" : ""}.`]);
+    out.push(["", `The server could reuse ${n(reused)} tokens (up to the last checkpoint before the change) and had to recompute ${n(fresh)} of ${n(r.prompt_tokens)}.`]);
+    out.push(["", cost()]);
+    out.push(["muted", k === "compaction" ? "Compaction shortens the conversation but rewrites it, so the next request pays a re-prefill once." : "On this hybrid model, edits to earlier messages are the expensive case; a plain-attention model would reuse everything up to the change."]);
+  } else if (k === "retry") {
+    out.push(["", `Identical to an earlier prompt; the server reused ${n(reused)} tokens and computed ${n(fresh)}.`]);
+    out.push(["", cost()]);
+  } else if (k === "side") {
+    out.push(["", `A small request without tools (${r.hint ? `starts with “${r.hint.slice(0, 50)}”` : "for example a session title"}): ${n(r.prompt_tokens)} tokens, ${n(fresh)} computed fresh.`]);
+    out.push(["", cost()]);
+    out.push(["muted", r.concurrent_with && r.concurrent_with.length ? "It ran while another request was using the GPU, which is why even a small prompt could take long." : "It took a slot of its own; on this two-slot server the main conversation's cache survived."]);
+  }
+  if (r.concurrent_with && r.concurrent_with.length && k !== "side") out.push(["muted", `It overlapped in time with ${r.concurrent_with.map(i => "#" + (S.byId[i] || {}).seq).join(", ")}; the GPU was shared, so both were slower than they would be alone.`]);
+  if (r.exact === false) out.push(["bad", "Caution: our rendering of this prompt does not have exactly the server's token count, so section boundaries may be slightly off."]);
+  if (r.log_match && !["exact", "none"].includes(r.log_match)) out.push(["muted", "The server-log task for this request was matched by timing rather than exact token counts, so server-side numbers are best-effort."]);
+  return out.filter(p => p[1]);
+}
+function renderHead() {
+  const d = S.detail, r = d.summary_row, h = $("#dhead");
+  h.innerHTML = "";
+  $("#tabs").hidden = false;
+  h.append(el("div", { class: "title" }, `#${r.seq}`, el("span", { class: `kind k-${kindOf(r)}`, title: kindHelp(r) }, kindLabel(r)), el("span", { class: "muted", style: "font-weight:400" }, `${hms(r.t_request)} · ${fmt(r.prompt_tokens)}-token prompt · ${fmt(r.n_tools)} tools · ${fmt(r.n_messages)} messages${r.slot != null ? " · slot " + r.slot : ""}`)));
+  const sessList = (sessionsOf(S.reqs).get(r.session_id || r.id) || []);
+  const pos = sessList.findIndex(x => x.id === r.id);
+  h.append(el("div", { class: "muted", style: "margin-top:2px" }, `${clientLabel(r)} · ${sessLabel(r)} · request ${pos + 1} of ${sessList.length} in this conversation`));
+  if (!AGENTS.includes(r.client_name)) h.append(el("p", { class: "warn", style: "margin:6px 0 0" }, `Sent by ${r.client}: a test or script rather than a coding agent, so its prompt says nothing about what your agent sends.`));
+  if (false) h.append(el("div", {}, el("span", {}, "")));
+  const ex = el("div", { class: "explain" });
+  explain(d).forEach(([cls, text], i) => ex.append(el("p", { class: (i === 0 ? "verdict " : "") + cls }, text)));
+  h.append(ex);
+}
+function renderPanel() {
+  const p = $("#panel"); p.innerHTML = "";
+  const d = S.detail;
+  if (!d) return;
+  ({ budget: renderBudget, tokens: renderTokens, diff: renderDiff, raw: renderRaw })[S.tab](p, d);
+}
+
+// ---------------------------------------------------------------- budget
+function renderBudget(p, d) {
+  p.append(el("p", { class: "intro" }, "Everything the model read for this request, and how many tokens each part is. Order matters: the server can only reuse the part before the first change, so a stable prefix (system prompt and tools) is what makes later requests cheap, and a big early section that changes is what makes them expensive."));
+  const groups = d.sections;
+  const stack = el("div", { class: "stack" });
+  for (const g of groups) stack.append(el("div", { class: `g-${g.id}`, style: `width:${g.pct}%`, title: `${g.label}: ${fmt(g.tokens)} tok (${g.pct}%)` }));
+  p.append(stack);
+  const lg = el("div", { class: "legend" });
+  const gl = { system: "system prompt", tools: "tool definitions", messages: "conversation", generation_prompt: "answer marker" };
+  for (const g of groups) lg.append(el("span", {}, el("i", { class: `g-${g.id}` }), `${gl[g.id] || g.label} ${fmt(g.tokens)} (${g.pct}%)`));
+  lg.append(el("span", {}, `total ${fmt(d.n_tokens)}`));
+  p.append(lg);
+  const tools = groups.find(g => g.id === "tools"), msgs = groups.find(g => g.id === "messages");
+  const facts = [];
+  if (tools && tools.tokens) {
+    const top = [...tools.children].filter(c => c.kind === "tool").sort((a, b) => b.tokens - a.tokens);
+    facts.push(`Tool definitions are ${tools.pct.toFixed(0)}% of the prompt (${fmt(d.n_tools)} tools). The largest ${top.length > 1 ? "are" : "is"} ${top.slice(0, 3).map(t => `${t.label} (${fmt(t.tokens)})`).join(", ")}. They are the same on every request, so they are paid once per session and reused afterwards; removing a large unused tool (for example with LOCAL_LLM_DISALLOWED_TOOLS) shortens every cold start.`);
+  }
+  if (msgs && msgs.children.length) {
+    const big = [...msgs.children].sort((a, b) => b.tokens - a.tokens)[0];
+    facts.push(`The conversation is ${msgs.pct.toFixed(0)}%; its largest message is ${big.label} with ${fmt(big.tokens)} tokens${big.role === "system" ? " (a system message inside the conversation: environment, CLAUDE.md, memory)" : ""}.`);
+  }
+  if (d.raw && d.raw.overhead != null) facts.push(`The chat template adds ${fmt(d.raw.overhead)} tokens on top of the raw text Claude Code sent (XML around tool schemas, turn markers): the “raw Δ” column shows it per section.`);
+  if (facts.length) p.append(el("div", { class: "note" }, ...facts.map(f => el("p", { style: "margin:3px 0" }, f))));
+  const row = el("div", { class: "row" },
+    el("button", { class: "btn" + (S.rawMode ? "" : " on"), onclick: () => { S.rawMode = false; renderPanel(); } }, "rendered tokens"),
+    el("button", { class: "btn" + (S.rawMode ? " on" : ""), onclick: () => { S.rawMode = true; renderPanel(); } }, "raw tokens"),
+    el("button", { class: "btn", onclick: () => { S.open = new Set(allIds(groups)); renderPanel(); } }, "expand all"),
+    el("button", { class: "btn", onclick: () => { S.open = new Set(["system", "tools", "messages"]); renderPanel(); } }, "collapse"),
+    el("span", { class: "muted" }, "click a section name to see its tokens"));
+  p.append(row);
+  p.append(el("div", { class: "hdr" }, el("span"), el("span", {}, "section"), el("span", { title: "tokens of this section in the rendered prompt" }, "tokens"), el("span", { title: "share of the whole prompt" }, "%"),
+    el("span", { title: "position of the section's first token; everything before the first change can be reused" }, "starts at"),
+    el("span", { title: S.rawMode ? "tokens of the raw text/JSON Claude Code sent, before the chat template" : "rendered minus raw: tokens the chat template added" }, S.rawMode ? "raw" : "raw Δ"), el("span", {}, "")));
+  const tree = el("div", { class: "tree" });
+  const maxTok = Math.max(1, ...groups.map(g => g.tokens));
+  const mk = (n, depth, parentMax) => {
+    const wrap = el("div");
+    let kids = n.children || [];
+    if (n.id === "tools") kids = [...kids].sort((a, b) => b.tokens - a.tokens);
+    const open = S.open.has(n.id);
+    const delta = n.raw_tokens == null ? "" : (S.rawMode ? fmt(n.raw_tokens) : ((n.tokens - n.raw_tokens >= 0 ? "+" : "") + fmt(n.tokens - n.raw_tokens)));
+    const rowEl = el("div", { class: "node" },
+      el("span", { class: "car", onclick: () => { open ? S.open.delete(n.id) : S.open.add(n.id); renderPanel(); } }, kids.length ? (open ? "▾" : "▸") : ""),
+      el("span", { class: "lab", title: n.id + (n.approx ? " (position approximate)" : ""), onclick: () => { S.tokSection = n.id; showTab("tokens"); } }, (gl[n.id] || n.label) + (n.approx ? " ~" : "")),
+      el("span", { class: "num" }, fmt(n.tokens)), el("span", { class: "num muted" }, n.pct.toFixed(1)), el("span", { class: "num muted" }, fmt(n.cum)),
+      el("span", { class: "num muted" }, delta),
+      el("span", { class: "mini" }, el("i", { style: `width:${100 * n.tokens / parentMax}%` })));
+    wrap.append(rowEl);
+    if (n.preview && !kids.length && n.kind !== "template") wrap.append(el("div", { class: "node" }, el("span"), el("span", { class: "prev mono" }, n.preview)));
+    if (open && kids.length) {
+      const kw = el("div", { class: "kids" });
+      const km = Math.max(1, ...kids.map(k => k.tokens));
+      for (const k of kids) kw.append(mk(k, depth + 1, km));
+      wrap.append(kw);
+    }
+    return wrap;
+  };
+  for (const g of groups) tree.append(mk(g, 0, maxTok));
+  p.append(tree);
+  if (!d.mapping_ok) p.append(el("p", { class: "warn" }, `Section mapping is approximate for this request: ${d.mapping_reason || "unknown reason"}.`));
+  if (d.log) {
+    p.append(el("h3", {}, "what the server logged"));
+    const L = d.log, sel = L.select || {};
+    p.append(el("div", { class: "muted" }, `Task ${L.task_id} on slot ${L.slot}. ${sel.by === "LCP" ? `It matched a cached prompt and kept ${Math.round((sel.f_keep || 0) * 100)}% of the slot (similarity ${sel.f_sim})` : sel.by === "LRU" ? "No cached prompt matched; it took the least recently used slot and started cold" : "Slot choice unknown"}. ` +
+      `Waited ${fs(L.queue_wait_s, 2)} for the slot, prefilled ${fmt(L.pp_tokens)} tokens in ${fs(L.pp_s)} (${Math.round(L.pp_rate || 0)} tok/s), generated ${fmt(L.tg_tokens)} tokens at ${(L.tg_rate || 0).toFixed(1)} tok/s. ` +
+      `The slot now holds ${fmt(L.n_tokens_final)} tokens.` + (L.evictions_mib && L.evictions_mib.length ? ` The host prompt cache evicted ${L.evictions_mib.map(x => x.toFixed(0) + " MiB").join(", ")} to make room.` : "")));
+  }
+  if (d.usage) {
+    const u = d.usage, ex = d.exact || {};
+    p.append(el("h3", {}, "what the response reported"));
+    p.append(el("div", { class: "muted" }, `input_tokens ${fmt(u.input_tokens)} (the fresh part), cache_read_input_tokens ${fmt(u.cache_read_input_tokens)} (reused), output_tokens ${fmt(u.output_tokens)}${u.output_tokens_estimated ? " (estimated)" : ""}. Our rendering has ${fmt(ex.n_rendered)} tokens: ${ex.usage === true ? "exactly the server's count." : ex.usage === false ? `differs by ${ex.delta}.` : "not comparable yet."}`));
+  }
+  p.append(el("h3", {}, "one-line summary"));
+  p.append(el("div", { class: "summary" }, d.summary_row.summary));
+}
+function allIds(nodes) { const out = []; const w = ns => { for (const n of ns) { out.push(n.id); if (n.children) w(n.children); } }; w(nodes); return out; }
+function findNode(nodes, id) { for (const n of nodes) { if (n.id === id) return n; if (n.children) { const f = findNode(n.children, id); if (f) return f; } } return null; }
+
+// ---------------------------------------------------------------- tokens (chunked, virtualized)
+function renderTokens(p, d) {
+  p.append(el("p", { class: "intro" }, "The exact tokens the model read, as the server tokenized them. Each shaded span is one token (hover for its number and id); ↵ marks a newline. Pick a section to jump to it. This is where to look when a count surprises you: JSON, paths and code tokenize into more pieces than prose."));
+  const secSel = el("select", { onchange: e => { S.tokSection = e.target.value || null; setHash(); renderPanel(); } });
+  secSel.append(el("option", { value: "" }, `whole prompt (${fmt(d.n_tokens)} tokens)`));
+  const w = (ns, depth) => { for (const n of ns) { const o = el("option", { value: n.id }, `${"  ".repeat(depth)}${n.label} (${fmt(n.tokens)})`); if (n.id === S.tokSection) o.selected = true; secSel.append(o); if (n.children) w(n.children, depth + 1); } };
+  w(d.sections, 0);
+  const node = S.tokSection ? findNode(d.sections, S.tokSection) : null;
+  const [start, end] = node ? node.tok : [0, d.n_tokens];
+  const divTok = d.diff && d.diff.first_divergent ? d.diff.first_divergent.tok : null;
+  const row = el("div", { class: "row" }, el("span", {}, "section:"), secSel, el("span", { class: "muted" }, `tokens ${fmt(start)}–${fmt(end)}`));
+  if (divTok != null && divTok >= start && divTok < end) row.append(el("button", { class: "btn", onclick: () => jumpTo(divTok) }, `jump to the first changed token (#${fmt(divTok)})`));
+  p.append(row);
+  const wrap = el("div", { id: "tokwrap" });
+  p.append(wrap);
+  const CH = 2048;
+  const chunks = [];
+  for (let s = start; s < end; s += CH) chunks.push({ s, e: Math.min(end, s + CH), el: null, h: 60, loaded: false, data: null });
+  const io = new IntersectionObserver(entries => {
+    for (const en of entries) {
+      const c = chunks[+en.target.dataset.i];
+      if (en.isIntersecting) fill(c); else if (c.loaded) unfill(c);
+    }
+  }, { root: $("#detail"), rootMargin: "1500px 0px" });
+  const fill = async c => {
+    if (c.loaded) return;
+    c.loaded = true;
+    if (!c.data) {
+      try { const r = await fetch(`/api/requests/${d.id}/tokens?start=${c.s}&end=${c.e}`); c.data = (await r.json()).tokens; } catch (e) { c.loaded = false; return; }
+    }
+    if (S.tab !== "tokens" || !c.el.isConnected) return;
+    const frag = document.createDocumentFragment();
+    c.data.forEach((t, i) => {
+      const idx = c.s + i; const txt = t[1];
+      const sp = el("span", { class: "tok" + (idx === divTok ? " divg" : "") + (txt.endsWith("\n") ? " nl" : "") }, txt.replace(/\n$/, ""));
+      sp.dataset.i = idx; sp.dataset.id = t[0];
+      frag.append(sp);
+      if (txt.includes("\n")) frag.append(document.createTextNode("\n"));
+    });
+    c.el.className = "chunk"; c.el.innerHTML = ""; c.el.style.minHeight = ""; c.el.append(frag);
+    c.h = c.el.offsetHeight || c.h;
+  };
+  const unfill = c => { c.loaded = false; c.h = c.el.offsetHeight || c.h; c.el.className = "chunk ph"; c.el.style.minHeight = c.h + "px"; c.el.textContent = `… tokens ${fmt(c.s)}–${fmt(c.e)} …`; };
+  chunks.forEach((c, i) => { c.el = el("div", { class: "chunk ph", style: `min-height:${c.h}px` }, `… tokens ${fmt(c.s)}–${fmt(c.e)} …`); c.el.dataset.i = i; wrap.append(c.el); io.observe(c.el); });
+  const tip = $("#tip");
+  wrap.addEventListener("mousemove", e => {
+    const t = e.target.closest(".tok"); if (!t) { tip.style.display = "none"; return; }
+    tip.textContent = `token #${Number(t.dataset.i).toLocaleString()}  id ${t.dataset.id}  ${JSON.stringify(t.textContent)}${t.classList.contains("nl") ? "+\\n" : ""}`;
+    tip.style.display = "block"; tip.style.left = Math.min(window.innerWidth - 320, e.clientX + 12) + "px"; tip.style.top = (e.clientY + 14) + "px";
+  });
+  wrap.addEventListener("mouseleave", () => tip.style.display = "none");
+  function jumpTo(tok) {
+    const c = chunks.find(c => c.s <= tok && tok < c.e); if (!c) return;
+    fill(c).then(() => { const sp = c.el.querySelector(`[data-i="${tok}"]`); if (sp) sp.scrollIntoView({ block: "center" }); });
+  }
+  if (divTok != null && divTok >= start && divTok < end && S.tokDiv === d.id) setTimeout(() => jumpTo(divTok), 50);
+  S.tokDiv = null;
+}
+
+// ---------------------------------------------------------------- diff
+async function renderDiff(p, d) {
+  p.append(el("p", { class: "intro" }, "The server reuses the part of the prompt that is identical to what it processed last time and computes the rest. This compares the prompt with an earlier one, token by token, to show how far the identical part reaches and what the first difference is."));
+  const cur = S.byId[d.id] || {};
+  const earlier = S.reqs.filter(r => r.t_request < cur.t_request && r.id !== d.id);
+  if (!earlier.length && !d.diff) { p.append(el("div", { class: "empty" }, "This is the first recorded request, so there is nothing earlier to compare with. Its whole prompt had to be computed.")); return; }
+  const other = S.diffOther || d.parent_id;
+  const sel = el("select", { onchange: async e => { S.diffOther = e.target.value; renderPanel(); } });
+  for (const r of earlier.slice().reverse()) { const o = el("option", { value: r.id }, `#${r.seq} ${kindLabel(r)}, ${fmt(r.prompt_tokens)} tokens${r.id === d.parent_id ? " (closest match)" : ""}`); if (r.id === other) o.selected = true; sel.append(o); }
+  p.append(el("div", { class: "row" }, el("span", {}, "compared with"), sel));
+  let diff = d.diff;
+  if (other && other !== d.parent_id) {
+    try { const r = await fetch(`/api/requests/${d.id}/diff?other=${encodeURIComponent(other)}`); diff = await r.json(); } catch (e) { diff = null; }
+  }
+  if (!diff) { p.append(el("div", { class: "empty" }, "No comparison available.")); return; }
+  const n = diff.cur_len, lcp = diff.lcp;
+  const bar = el("div", { class: "dbar" }, el("div", { class: "sh", style: `width:${100 * lcp / n}%` }), el("div", { class: "tl", style: `left:${100 * lcp / n}%;right:0` }));
+  for (const g of d.sections) bar.append(el("div", { class: "tick", style: `left:${100 * g.tok[0] / n}%`, title: g.label }));
+  p.append(bar);
+  const fd = diff.first_divergent;
+  p.append(el("div", { class: "legend" },
+    el("span", {}, el("i", { style: "background:var(--shared)" }), `identical start: ${fmt(lcp)} tokens`),
+    el("span", {}, el("i", { style: "background:var(--tail)" }), `${diff.end_extension ? "new at the end" : "different from here on"}: ${fmt(n - lcp)} tokens`),
+    el("span", { class: "muted" }, `the other prompt had ${fmt(diff.parent_len)} tokens${diff.parent_dropped ? `, ${fmt(diff.parent_dropped)} of them not in this one` : ""}`)));
+  if (diff.end_extension) {
+    p.append(el("div", { class: "note" }, el("p", { class: "good", style: "margin:0 0 4px;font-weight:600" }, "This prompt starts with the entire other prompt and only adds to the end."),
+      el("p", { style: "margin:0" }, `That is the case the cache is built for: the server reuses everything it had and computes only the new ${fmt(n - lcp)} tokens (in practice ${fmt(diff.expected_prefill_min)}–${fmt(diff.expected_prefill_max)}, because the model's own previous answer is usually already in the slot). The new tokens are listed below; their size is the whole cost of this request.`)));
+    const appended = [];
+    const w = ns => { for (const x of ns) { if (x.children && x.children.length) w(x.children); else if (x.tok[1] > lcp) appended.push(x); } };
+    w(d.sections);
+    p.append(el("h3", {}, "what was added"));
+    for (const x of appended) p.append(el("div", { class: "node" }, el("span"), el("span", { class: "lab", onclick: () => { S.tokSection = x.id; showTab("tokens"); } }, x.label), el("span", { class: "num" }, fmt(Math.max(0, x.tok[1] - Math.max(x.tok[0], lcp)))), el("span", { class: "num muted" }, ""), el("span", { class: "num muted" }, fmt(x.tok[0])), el("span"), el("span", { class: "prev mono", style: "grid-column:auto" }, x.preview || "")));
+  } else if (fd) {
+    const ch = diff.changed_text;
+    p.append(el("div", { class: "note" },
+      el("p", { class: "warn", style: "margin:0 0 4px;font-weight:600" }, `The first difference is at token ${fmt(fd.tok)}, in ${secName(fd.cur_section)}${fd.parent_section && fd.parent_section !== fd.cur_section ? ` (the other prompt had ${secName(fd.parent_section)} there)` : ""}.`),
+      el("p", { style: "margin:0" }, ch ? `${ch.added && !ch.removed ? "Text was added" : ch.removed && !ch.added ? "Text was removed" : "Text was changed"} inside that block (shown below). ` : "", `Everything after this point had to be recomputed${cur.select === "LRU" ? "; the server found no usable cached prefix at all and started cold" : cur.reused ? `, and the server could reuse ${fmt(cur.reused)} tokens (the last checkpoint before the change, not the change itself)` : ""}.`)));
+    if (ch) {
+      p.append(el("div", { class: "ctx" },
+        el("div", {}, el("div", { class: "capt" }, `removed from ${secName(ch.section)} (character ${fmt(ch.at_char)})`), el("pre", {}, ch.removed || "(nothing)")),
+        el("div", {}, el("div", { class: "capt" }, `added to ${secName(ch.section)}`), el("pre", {}, ch.added || "(nothing)"))));
+    }
+    if (fd.cur_context != null) {
+      const hl = (ctx, split, piece) => { const a = ctx.slice(0, split), b = ctx.slice(split, split + (piece || "").length), c = ctx.slice(split + (piece || "").length); return `${esc(a)}<b>${esc(b)}</b>${esc(c)}`; };
+      p.append(el("h3", {}, "the two prompts around that token"));
+      p.append(el("div", { class: "ctx" },
+        el("div", {}, el("div", { class: "capt" }, "this prompt (first differing token highlighted)"), el("pre", { html: hl(fd.cur_context, fd.cur_context_split, fd.cur_piece) })),
+        el("div", {}, el("div", { class: "capt" }, "the other prompt at the same position"), el("pre", { html: hl(fd.parent_context, fd.parent_context_split, fd.parent_piece) }))));
+    }
+    p.append(el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "btn", onclick: () => { S.tokSection = fd.cur_section; S.tokDiv = d.id; showTab("tokens"); } }, "open that section in the token view")));
+  } else {
+    p.append(el("div", { class: "note" }, "The two prompts are identical."));
+  }
+}
+
+// ---------------------------------------------------------------- raw
+async function renderRaw(p, d) {
+  p.append(el("p", { class: "intro" }, "The request exactly as Claude Code sent it (the JSON body, with credentials removed) and the response stream from the server, for checking details the views above summarize."));
+  const box = el("div");
+  p.append(el("div", { class: "row" },
+    el("button", { class: "btn", onclick: async () => { const r = await fetch(`/api/requests/${d.id}/body`); box.innerHTML = ""; box.append(el("pre", { class: "raw" }, JSON.stringify(await r.json(), null, 1))); } }, "request body (JSON)"),
+    el("button", { class: "btn", onclick: async () => { const r = await fetch(`/api/requests/${d.id}/sse`); box.innerHTML = ""; box.append(el("pre", { class: "raw" }, (await r.json()).join("\n"))); } }, "response stream (SSE)"),
+    el("button", { class: "btn", onclick: () => { box.innerHTML = ""; box.append(el("pre", { class: "raw" }, JSON.stringify({ timing: d.timing, usage: d.usage, log: d.log, exact: d.exact, flags: d.flags, meta: d.meta }, null, 1))); } }, "timing, usage and log (JSON)")));
+  p.append(box);
+  p.append(el("p", { class: "muted" }, `Files: tmp/trace/${d.id}.json (trace) and tmp/trace/${d.id}.analysis.json (analysis). The same information is printed by bin/trace.py --dump ${d.seq}.`));
+}
+
+// ---------------------------------------------------------------- keys / hash
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  const list = visible(); if (!list.length) return;
+  let i = list.findIndex(r => r.id === S.selected);
+  if (e.key === "j") { i = Math.min(list.length - 1, i + 1); select(list[i].id, true); }
+  if (e.key === "k") { i = Math.max(0, i - 1); select(list[i].id, true); }
+});
+if (location.hash.length > 1) { S.follow = false; $("#follow").checked = false; const [id, tab, sec] = location.hash.slice(1).split("/"); S.selected = id; if (tab) { S.tab = tab; document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tab)); } if (sec) S.tokSection = decodeURIComponent(sec); }
+poll().then(() => { if (S.selected && S.byId[S.selected]) loadDetail(S.selected); });
+setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

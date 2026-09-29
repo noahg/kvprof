@@ -1,11 +1,10 @@
 """Human-readable output: one summary dict / line per request, the session report, a per-request dump."""
 import json
-import os
 import sys
 import time
 
 from .sections import find_node, iter_nodes
-from .util import fmt_n
+from .util import display_path, fmt_n
 
 
 def summarize(a):
@@ -115,13 +114,6 @@ def _short(s, n=48):
     return s[:n] + ("…" if len(s) > n else "")
 
 
-def _rel(path):
-    try:
-        return os.path.relpath(path)
-    except ValueError:
-        return path
-
-
 def print_session(p, last=None, as_json=False, out=None):
     out = out or sys.stdout
     an = p.analyses
@@ -136,7 +128,7 @@ def print_session(p, last=None, as_json=False, out=None):
         anchor = "no server log (pass --server-log for server-side prefill numbers)"
     else:
         anchor = f"log anchor from {p.anchor_src}" + (f" ({time.strftime('%H:%M:%S', time.localtime(p.anchor))})" if p.anchor else "")
-    print(f"session: {len(p.analyses)} requests in {_rel(p.store.trace_dir)}, model {info.model_name} ({p.backend.name} {build}, "
+    print(f"session: {len(p.analyses)} requests in {display_path(p.store.trace_dir)}, model {info.model_name} ({p.backend.name} {build}, "
           f"template {p.profile}), {anchor}", file=out)
     for a in an:
         print(summary_line(a), file=out)
