@@ -1,0 +1,22 @@
+0.00.012.345 I build: 10909 (a2878d30d) with AppleClang for Darwin arm64
+0.15.310.880 I srv    load_model: initializing, n_slots = 2, n_ctx_slot = 8192, kv_unified = 'false'
+1.00.100.000 I slot get_availabl: id  1 | task -1 | selected slot by LRU, t_last = -1
+1.00.100.050 I slot launch_slot_: id  1 | task 0 | processing task, is_child = 0
+1.02.148.000 I slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   2048, progress = 0.50, t =   2.05 s / 999.02 tokens per second
+1.04.200.000 I slot print_timing: id  1 | task 0 | prompt eval time =    4100.00 ms /  4000 tokens (    1.03 ms per token,   975.61 tokens per second)
+1.04.200.003 I slot print_timing: id  1 | task 0 |        eval time =     400.00 ms /    20 tokens (   20.00 ms per token,    50.00 tokens per second)
+1.04.200.004 I slot print_timing: id  1 | task 0 |       total time =    4500.00 ms /  4020 tokens
+1.04.200.050 I slot      release: id  1 | task 0 | stop processing: n_tokens = 4019, truncated = 0
+1.10.000.000 I slot get_availabl: id  1 | task -1 | selected slot by LCP similarity, f_sim_best = 0.950 (> 0.100 thold), f_keep = 1.000
+1.10.000.100 I slot launch_slot_: id  1 | task 25 | processing task, is_child = 0
+1.10.300.000 I slot print_timing: id  1 | task 25 | n_gen =    100, tg =  48.10 t/s, tg_3s =  48.20 t/s
+1.10.500.000 I slot print_timing: id  1 | task 25 | prompt eval time =     300.00 ms /   210 tokens (    1.43 ms per token,   700.00 tokens per second)
+1.10.500.003 I slot print_timing: id  1 | task 25 |        eval time =     200.00 ms /    10 tokens (   20.00 ms per token,    50.00 tokens per second)
+1.10.500.050 I slot      release: id  1 | task 25 | stop processing: n_tokens = 4229, truncated = 0
+1.20.000.000 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+1.20.000.100 I slot launch_slot_: id  0 | task 40 | processing task, is_child = 0
+1.21.000.000 W srv          stop: cancel task, id_task = 40
+1.21.000.200 W srv         alloc:  - making room for prompt cache entry, removing oldest entry (size = 512.250 MiB)
+1.21.500.000 E srv    send_error: task id = 41, error: request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it
+0.00.500.000 I slot get_availabl: id  0 | task -1 | selected slot by LRU, t_last = -1
+0.00.500.100 I slot launch_slot_: id  0 | task 0 | processing task, is_child = 0

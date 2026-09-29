@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kvprof"
+dynamic = ["version"]
+description = "Prompt-cache profiler for llama.cpp's llama-server: why did it re-prefill my prompt?"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Noah Glusenkamp" }]
+keywords = ["llama.cpp", "llama-server", "prompt cache", "kv cache", "profiler", "llm", "claude code", "opencode"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+kvprof = "kvprof.cli:main"
+
+[tool.hatch.version]
+path = "src/kvprof/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kvprof"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/kvprof", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
