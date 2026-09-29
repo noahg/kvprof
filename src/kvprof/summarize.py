@@ -16,6 +16,10 @@ def summarize(a):
     groups = {n["id"]: n["tokens"] for n in a["sections"]}
     sel = lg.get("select") or {}
     prefilled = lg.get("pp_tokens") if lg.get("pp_tokens") is not None else a.get("prefilled_usage")
+    pp_s, pp_rate = lg.get("pp_s"), lg.get("pp_rate")
+    if not lg and u.get("prefill_ms") is not None:  # no log match: llama.cpp timings from the response itself
+        pp_s = round(u["prefill_ms"] / 1000, 2)
+        pp_rate = round(u["uncached"] / pp_s, 1) if u.get("uncached") and pp_s else None
     return {
         "id": a["id"], "seq": a.get("seq"), "api": a.get("api"), "kind": a["kind"], "subkind": a.get("subkind"), "hint": a.get("hint"),
         "outcome": a.get("outcome"), "stage": a.get("stage"), "stop_reason": a.get("stop_reason"),
@@ -27,7 +31,7 @@ def summarize(a):
         "lcp": d.get("lcp"), "appended": d.get("appended"), "parent_len": d.get("parent_len"),
         "diverge_tok": fd.get("tok"), "diverge_section": fd.get("cur_section"),
         "changed_added": (d.get("changed_text") or {}).get("added"), "changed_removed": (d.get("changed_text") or {}).get("removed"),
-        "pp_s": lg.get("pp_s"), "pp_rate": lg.get("pp_rate"), "tg_rate": lg.get("tg_rate"), "tg_tokens": lg.get("tg_tokens"),
+        "pp_s": pp_s, "pp_rate": pp_rate, "tg_rate": lg.get("tg_rate") if lg else u.get("decode_rate"), "tg_tokens": lg.get("tg_tokens"),
         "slot": lg.get("slot"), "task_id": lg.get("task_id"), "select": sel.get("by"), "f_keep": sel.get("f_keep"),
         "reused_from_log": lg.get("reused_from_log"), "queue_wait_s": lg.get("queue_wait_s"), "evictions_mib": lg.get("evictions_mib"),
         "exact": (a.get("exact") or {}).get("usage"), "usage_semantics": (a.get("exact") or {}).get("usage_semantics"),

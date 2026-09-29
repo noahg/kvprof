@@ -6,6 +6,7 @@ with a stable id. Section builders locate units in the rendered prompt; diffs an
 units up by id.
 """
 import json
+import re
 from dataclasses import dataclass
 
 from .convert import DEFAULT_VARIANT, _json_args, anthropic_to_openai, tool_result_text
@@ -257,7 +258,7 @@ KNOWN_CLIENTS = [("claude-cli", "Claude Code"), ("opencode", "OpenCode"), ("ai-s
                  ("bun", "bun")]
 # Clients that are coding agents (the GUI treats everything else as a script or test).
 AGENT_CLIENTS = ("Claude Code", "OpenCode", "aider", "Continue", "Cline")
-SESSION_HEADERS = ("x-claude-code-session-id", "x-session-id", "x-opencode-session", "x-opencode-session-id", "session_id", "x-conversation-id")
+SESSION_HEADERS = ("x-claude-code-session-id", "x-opencode-session", "x-session-id", "x-session-affinity", "x-conversation-id")
 
 
 def client_info(headers, body):
@@ -266,7 +267,9 @@ def client_info(headers, body):
     h = {k.lower(): v for k, v in (headers or {}).items()}
     ua = h.get("user-agent", "") or ""
     first = ua.split(" ")[0]
-    name, _, version = first.partition("/")
+    name, _, rest = first.partition("/")
+    # "claude-cli/2.1.285", "opencode/latest/2.0.17/cli": the first dotted-number segment is the version
+    version = next((seg for seg in rest.split("/") if re.match(r"^v?\d+(\.\d+)+", seg)), rest)
     client = None
     for prefix, label in KNOWN_CLIENTS:
         if first.lower().startswith(prefix) or (prefix == "ai-sdk" and "ai-sdk/" in ua.lower()):

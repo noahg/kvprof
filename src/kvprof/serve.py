@@ -150,9 +150,9 @@ def serve(p, host, port):
     httpd = ThreadingHTTPServer((host, port), make_handler(p))
     httpd.daemon_threads = True
     trace_dir = display_path(p.store.trace_dir)
-    print(f"{PACKAGE_NAME} GUI: http://{host}:{httpd.server_address[1]}/   (traces in {trace_dir}; Ctrl-C to stop)")
+    print(f"{PACKAGE_NAME} GUI: http://{host}:{httpd.server_address[1]}/   (traces in {trace_dir}; Ctrl-C to stop)", flush=True)
     if p.telemetry is None:
-        print("  no --server-log given: server-side prefill/decode numbers and slot choice will be missing")
+        print("  no --server-log given: server-side prefill/decode numbers and slot choice will be missing", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

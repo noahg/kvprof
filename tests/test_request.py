@@ -66,6 +66,8 @@ def test_client_info():
     assert ci["session"] == "sess-1" and ci["session_source"] == "metadata"
     ci = client_info({"user-agent": "opencode/0.15.3 ai-sdk/provider-utils/3.0.9 runtime/bun/1.2.23"}, OAI)
     assert ci["client"] == "OpenCode" and ci["version"] == "0.15.3" and ci["session"] == "u-42" and ci["session_source"] == "user"
+    ci = client_info({"user-agent": "opencode/latest/2.0.17/cli", "x-opencode-session": "ses_f1", "x-session-id": "ses_f1"}, {})
+    assert (ci["client"], ci["version"], ci["session"], ci["session_source"]) == ("OpenCode", "2.0.17", "ses_f1", "header")
     ci = client_info({"user-agent": "ai-sdk/openai-compatible/1.0.19 ai-sdk/provider-utils/3.0.9 runtime/bun/1.2.23"}, {})
     assert ci["client"] == "AI SDK app"
     assert client_info({"user-agent": "OpenAI/Python 1.99.0"}, {})["client"] == "OpenAI Python SDK"

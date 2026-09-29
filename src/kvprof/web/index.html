@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>claudelocal trace</title>
+<title>kvprof</title>
 <style>
 :root {
   --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e2e2dd; --line2: #cfcfc8;
@@ -149,8 +149,8 @@ dl.gloss dd { margin: 0; color: var(--muted); }
 </head>
 <body>
 <header>
-  <h1>claudelocal trace</h1>
-  <span class="sub">what your coding agents send to the local model, and what each request costs</span>
+  <h1 id="title">kvprof</h1>
+  <span class="sub">what your clients send to llama-server, and why each request cost what it did</span>
   <span class="sub" id="hmeta"><span class="dot" id="dot"></span>connecting…</span>
   <label class="toggle"><input type="checkbox" id="follow" checked> follow newest request</label>
 </header>
@@ -159,29 +159,29 @@ dl.gloss dd { margin: 0; color: var(--muted); }
     <details class="intro" id="howto">
       <summary>How to read this page</summary>
       <div class="body">
-        <p>Every time a coding agent (Claude Code, OpenCode, …) needs the model it sends the <b>whole conversation as one prompt</b>: the system prompt, every tool definition, and all messages so far. For this session that is roughly 30–40K tokens per request.</p>
+        <p>Every time a coding agent (Claude Code, OpenCode, …) needs the model it sends the <b>whole conversation as one prompt</b>: the system prompt, every tool definition, and all messages so far.<span id="med-prompt"></span></p>
         <p>The server keeps the last prompt it processed. If the new prompt <b>starts with exactly the same tokens</b>, it reuses that work and only computes ("prefills") the new tail. Time to first token is almost entirely prefill time, so the question for every request is: <b>how much was new, and why?</b></p>
         <p>The <b>request list</b> answers it at a glance (grey = reused, orange = computed fresh), grouped by conversation when several agents or sessions share the server. Click a request: the panel on the right explains it in words, <b>What's in the prompt</b> shows what the tokens are, <b>Why it cost this</b> shows where the prompt first differs from the previous one, and <b>Tokens</b> shows the exact tokens the model read.</p>
-        <p>One rule to remember for this model (Qwen3-Coder-Next, a hybrid DeltaNet model): reuse works only when the new prompt <b>extends</b> the previous one. Normal turns and tool results do that. Anything that changes an earlier message costs a re-prefill from the last checkpoint.</p>
+        <p>One rule to remember: reuse works best when the new prompt <b>extends</b> the previous one. Normal turns and tool results do that. Some architectures (hybrid/recurrent models: DeltaNet or Mamba hybrids) reuse only when the new prompt extends the previous one; plain-attention models reuse everything up to the first change. Anything that changes an earlier message costs a re-prefill from there (or from the last checkpoint before it).</p>
         <details><summary style="padding:4px 0;font-weight:500">Glossary</summary>
           <dl class="gloss">
             <dt>token</dt><dd>the unit the model reads; ~4 characters of English, fewer for code and JSON.</dd>
-            <dt>prefill</dt><dd>processing prompt tokens before the first output token; ~250–350 tokens/s on this Mac, so 30K fresh tokens ≈ 100 s.</dd>
-            <dt>reused / cache_read</dt><dd>prompt tokens the server already had processed for an earlier request and did not compute again.</dd>
+            <dt>prefill</dt><dd>processing prompt tokens before the first output token<span id="pp-speed"></span>.</dd>
+            <dt>reused / cached</dt><dd>prompt tokens the server already had processed for an earlier request and did not compute again (Anthropic usage: <i>cache_read_input_tokens</i>; OpenAI usage: <i>prompt_tokens_details.cached_tokens</i>).</dd>
             <dt>TTFT</dt><dd>time to first token: from sending the request until the first piece of the answer arrived. Includes prefill and any waiting for the GPU.</dd>
-            <dt>decode</dt><dd>generating the answer, token by token; ~30–40 tokens/s here.</dd>
-            <dt>slot</dt><dd>one conversation's cached state on the server. This server has two, so a small side request need not evict the main conversation.</dd>
+            <dt>decode</dt><dd>generating the answer, token by token<span id="tg-speed"></span>.</dd>
+            <dt>slot</dt><dd>one conversation's cached state on the server<span id="slot-count"></span>. With more than one, a small side request need not evict the main conversation.</dd>
             <dt>LCP / LRU</dt><dd>how the server picked a slot: LCP = it found a slot whose cached prompt shares a prefix with the new one (the fraction kept is <i>f_keep</i>); LRU = nothing matched, it took the least recently used slot and started from scratch.</dd>
             <dt>end-extension</dt><dd>a prompt that is the previous prompt plus new tokens at the end. The cheap case.</dd>
-            <dt>tool round-trip</dt><dd>Claude Code sending a tool's result back to the model; an end-extension whose cost is the size of the result.</dd>
-            <dt>template overhead</dt><dd>tokens added by the chat template (XML around tool schemas, turn markers) on top of the raw text Claude Code sent.</dd>
+            <dt>tool round-trip</dt><dd>the client sending a tool's result back to the model; an end-extension whose cost is the size of the result.</dd>
+            <dt>template overhead</dt><dd>tokens added by the chat template (markup around tool schemas, turn markers) on top of the raw text the client sent.</dd>
           </dl>
         </details>
       </div>
     </details>
 
     <section class="block" id="sess">
-      <h2>This session</h2>
+      <h2>Overview</h2>
       <div class="tiles" id="tiles"></div>
       <div class="takeaway" id="takeaway"></div>
     </section>
@@ -194,7 +194,7 @@ dl.gloss dd { margin: 0; color: var(--muted); }
 
     <section class="block">
       <h2>Requests</h2>
-      <p class="cap">One row per request that reached the tap. When several conversations (sessions of Claude Code, OpenCode, or other clients) share the server, rows are grouped by conversation; click a group row to fold it, or untick "group by conversation" for a single timeline. Anything sent by a script rather than an agent (curl, bin/bench.py) is marked "via …". The bar shows the prompt: <b>grey</b> is what the server reused, <b>orange</b> is what it computed fresh (this is what you wait for). Hover a column title or a kind badge for its meaning; <kbd>j</kbd>/<kbd>k</kbd> move the selection.</p>
+      <p class="cap">One row per request that reached the tap. When several conversations (sessions of Claude Code, OpenCode, or other clients) share the server, rows are grouped by conversation; click a group row to fold it, or untick "group by conversation" for a single timeline. Anything sent by a script rather than an agent (curl, a benchmark script) is marked "via …". The bar shows the prompt: <b>grey</b> is what the server reused, <b>orange</b> is what it computed fresh (this is what you wait for). Hover a column title or a kind badge for its meaning; <kbd>j</kbd>/<kbd>k</kbd> move the selection.</p>
       <div class="chips" id="chips"></div>
     </section>
     <table id="reqs">
@@ -204,7 +204,7 @@ dl.gloss dd { margin: 0; color: var(--muted); }
         <th class="l" title="what kind of request this was, judged by comparing its prompt with the previous ones (hover a badge)">kind</th>
         <th class="l" title="grey: tokens reused from the server's cache; orange: tokens computed fresh; red tick: where the prompt first differed from the previous one">prompt<small>reused | fresh</small></th>
         <th title="total tokens of the prompt the model read">prompt</th>
-        <th title="tokens the server already had (cache_read_input_tokens)">reused</th>
+        <th title="tokens the server already had (cached tokens reported in the response's usage)">reused</th>
         <th title="tokens computed fresh (from the server log); this drives time to first token">fresh</th>
         <th title="time to first token, as seen by the client">TTFT</th>
         <th title="server-side prefill time and speed for the fresh tokens">prefill</th>
@@ -215,7 +215,7 @@ dl.gloss dd { margin: 0; color: var(--muted); }
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <div class="empty" id="empty">No requests yet. Start <span class="mono">bin/tap.py</span>, then run <span class="mono">LOCAL_LLM_URL=http://localhost:8083 claudelocal</span>. Requests appear here as they happen.</div>
+    <div class="empty" id="empty">No requests yet. Start <span class="mono">kvprof tap --upstream http://127.0.0.1:8080</span>, then point a client at it: <span class="mono">ANTHROPIC_BASE_URL=http://127.0.0.1:8081 claude</span>, or an OpenAI client with <span class="mono">OPENAI_BASE_URL=http://127.0.0.1:8081/v1</span> (OpenCode: <span class="mono">provider.&lt;name&gt;.options.baseURL</span>). Requests appear here as they happen.</div>
   </section>
 
   <aside id="detail">
@@ -234,16 +234,16 @@ dl.gloss dd { margin: 0; color: var(--muted); }
 (() => {
 const KINDS = ["cold", "warm", "main_turn", "tool_roundtrip", "side", "rewrite", "compaction", "retry"];
 const KIND_INFO = {
-  cold: ["cold start", "Nothing in the server's cache matched this prompt; every token was computed from scratch. Normal for the first turn of a session, after changing directory or model, or when both slots were taken by other conversations."],
+  cold: ["cold start", "Nothing in the server's cache matched this prompt; every token was computed from scratch. Normal for the first turn of a session, after changing directory or model, or when every slot was taken by other conversations."],
   warm: ["warm (unrecorded parent)", "The server reused most of this prompt from a request the tap did not record (for example one sent directly to the server)."],
   main_turn: ["new turn", "A new user message. The prompt is the previous one plus the model's last answer and the new message, so the server reused everything it had."],
-  tool_roundtrip: ["tool round-trip", "Claude Code sent a tool's result back. The prompt is the previous one plus the tool call and its result; the cost is the size of that result."],
-  side: ["side request", "A small request without tools (session title, summaries, sub-agents). It uses a slot but does not touch the main conversation on this two-slot server."],
+  tool_roundtrip: ["tool round-trip", "The client sent a tool's result back. The prompt is the previous one plus the tool call and its result; the cost is the size of that result."],
+  side: ["side request", "A small request without tools (session title, summaries, sub-agents). It uses a slot of its own when the server has more than one, so the main conversation's cache can survive."],
   rewrite: ["rewrite", "Something before the end of the prompt changed (an earlier message was edited or a reminder injected). The server could only reuse up to the change, or up to the last checkpoint before it."],
-  compaction: ["compaction", "Claude Code replaced the conversation with a shorter summary; the prompt differs from the previous one inside the messages and is shorter."],
+  compaction: ["compaction", "The client replaced the conversation with a shorter summary; the prompt differs from the previous one inside the messages and is shorter."],
   retry: ["retry", "The same prompt sent again."],
   inflight: ["in flight", "The server is processing this request right now."],
-  client_disconnect: ["cancelled", "Claude Code closed the connection before the answer finished (Escape, a timeout, or a superseded request); the server cancelled the task."],
+  client_disconnect: ["cancelled", "The client closed the connection before the answer finished (Escape, a timeout, or a superseded request); the server cancelled the task."],
   http_error: ["rejected", "The server answered with an HTTP error (most often: the prompt does not fit the context window)."],
   upstream_closed: ["server closed", "The server closed the connection before the answer was complete."],
 };
@@ -263,7 +263,7 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", 
 const kindOf = r => (r.outcome && r.outcome !== "ok" ? r.outcome : r.kind);
 const kindLabel = r => (KIND_INFO[kindOf(r)] || [kindOf(r)])[0];
 const kindHelp = r => (KIND_INFO[kindOf(r)] || ["", ""])[1];
-const AGENTS = ["Claude Code", "OpenCode"];
+const AGENTS = ["Claude Code", "OpenCode", "aider", "Continue", "Cline"];
 const clientLabel = r => `${r.client_name || "unknown client"}${r.client_version ? " " + r.client_version : ""}`;
 const sessShort = r => (r.session_id || "?").slice(0, 8);
 const sessLabel = r => r.session_inferred ? `conversation ${sessShort(r)} (inferred from the prompt)` : `session ${sessShort(r)}`;
@@ -279,7 +279,7 @@ const secName = id => {
 };
 
 // remember whether the intro was collapsed
-try { const h = $("#howto"); h.open = localStorage.getItem("trace.howto") !== "closed"; h.addEventListener("toggle", () => localStorage.setItem("trace.howto", h.open ? "open" : "closed")); } catch (e) { $("#howto").open = true; }
+try { const h = $("#howto"); h.open = localStorage.getItem("kvprof.howto") !== "closed"; h.addEventListener("toggle", () => { try { localStorage.setItem("kvprof.howto", h.open ? "open" : "closed"); } catch (e) {} }); } catch (e) { $("#howto").open = true; }
 
 // ---------------------------------------------------------------- polling
 async function poll() {
@@ -305,10 +305,22 @@ async function poll() {
 function setLive(on) { S.live = on; const d = $("#dot"); if (d) d.className = "dot" + (on ? " live" : ""); }
 
 // ---------------------------------------------------------------- header / session summary
+const median = xs => { const v = xs.filter(x => x != null && isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const h = v.length >> 1; return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2; };
 function renderHeader() {
   const m = S.meta;
-  const anchor = m.anchor ? `server log aligned via ${m.anchor_src}` : "server log not aligned";
-  $("#hmeta").innerHTML = `<span class="dot${S.live ? " live" : ""}" id="dot"></span>${esc(m.model || "?")} · ${anchor}`;
+  const pkg = m.package || "kvprof";
+  document.title = `${pkg} · ${m.model || "?"}`; $("#title").textContent = pkg;
+  const anchor = !m.has_log ? "no server log (start serve with --server-log)" : m.anchor ? `server log aligned via ${m.anchor_src}` : "server log not aligned";
+  const build = m.build ? ` ${String(m.build).split("-")[0]}` : "";
+  $("#hmeta").innerHTML = `<span class="dot${S.live ? " live" : ""}" id="dot"></span>${esc(m.model || "?")} · ${esc(m.backend || "")}${esc(build)}${m.n_slots != null ? ` · ${m.n_slots} slot${m.n_slots === 1 ? "" : "s"} × ${fmt(m.n_ctx)} tokens` : ""} · template ${esc(m.profile || "?")} · ${anchor}`;
+  // numbers the intro quotes, measured on this server
+  const ok = S.reqs.filter(r => r.outcome === "ok");
+  const pp = median(ok.filter(r => (r.prefilled || 0) >= 512).map(r => r.pp_rate)), tg = median(ok.map(r => r.tg_rate));
+  const mp = median(S.reqs.map(r => r.prompt_tokens));
+  $("#pp-speed").textContent = pp ? `; about ${Math.round(pp)} tokens/s on this server (median of the recorded requests), so 30K fresh tokens take about ${fmtDur(30000 / pp)}` : "";
+  $("#tg-speed").textContent = tg ? `; about ${Math.round(tg)} tokens/s on this server` : "";
+  $("#slot-count").textContent = m.n_slots != null ? `; this server has ${m.n_slots}` : "";
+  $("#med-prompt").textContent = mp ? ` In this trace directory the median prompt is ${fmt(Math.round(mp))} tokens.` : "";
 }
 function renderSession() {
   const tiles = $("#tiles"), tk = $("#takeaway");
@@ -324,7 +336,8 @@ function renderSession() {
   const t0 = Math.min(...all.map(r => r.t_request || Infinity)), t1 = Math.max(...all.map(r => r.t_last_byte || r.t_request || 0));
   const wall = Math.max(0, t1 - t0);
   const pp = ok.reduce((a, r) => a + (r.pp_s || 0), 0), fresh = ok.reduce((a, r) => a + (r.prefilled || 0), 0), reused = ok.reduce((a, r) => a + (r.reused || r.cache_read || 0), 0);
-  const dec = ok.reduce((a, r) => a + ((r.tg_tokens || r.output_tokens || 0) / (r.tg_rate || 30)), 0);
+  const tgMed = median(ok.map(r => r.tg_rate)) || 30;
+  const dec = ok.reduce((a, r) => a + ((r.tg_tokens || r.output_tokens || 0) / (r.tg_rate || tgMed)), 0);
   const byKind = {}; for (const r of all) byKind[kindOf(r)] = (byKind[kindOf(r)] || 0) + 1;
   const costly = ok.filter(r => (r.pp_s || 0) >= 5).sort((a, b) => (b.pp_s || 0) - (a.pp_s || 0));
   const tile = (v, l, s) => el("div", { class: "tile" }, el("div", { class: "v" }, v), el("div", { class: "l" }, l), s ? el("div", { class: "s muted" }, s) : null);
@@ -379,10 +392,11 @@ function renderGantt() {
   const t0 = Math.min(...reqs.map(r => r.t_request));
   const t1 = Math.max(...reqs.map(r => r.t_last_byte || now));
   const W = svg.clientWidth || 800, padL = 44, padR = 10, laneH = 22, axisH = 18;
-  const lanes = ["slot 0", "slot 1", "no log"];
-  const laneOf = r => (r.slot == null ? 2 : Math.min(r.slot, 1));
+  const nSlots = Math.max(1, S.meta.n_slots || 1);
+  const lanes = S.meta.lanes && S.meta.lanes.length === nSlots + 1 ? S.meta.lanes : [...Array(nSlots).keys()].map(i => `slot ${i}`).concat(["no log"]);
+  const laneOf = r => (r.slot == null ? nSlots : Math.min(r.slot, nSlots - 1));
   const usedLanes = new Set(reqs.map(laneOf));
-  const laneIdx = {}; let li = 0; for (let i = 0; i < 3; i++) if (usedLanes.has(i)) laneIdx[i] = li++;
+  const laneIdx = {}; let li = 0; for (let i = 0; i <= nSlots; i++) if (usedLanes.has(i)) laneIdx[i] = li++;
   const H = li * laneH + axisH + 6;
   svg.setAttribute("height", H);
   const x = t => padL + (W - padL - padR) * ((t - t0) / Math.max(1e-6, t1 - t0));
@@ -497,14 +511,14 @@ function explain(d) {
     return bits.length ? (bits[0][0] === bits[0][0].toUpperCase() ? "" : "") + bits.join(", ") + "." : "";
   };
   if (k === "inflight") return [["", "The server is still working on this request. The prompt has been rendered and mapped below; the cost will fill in when the answer completes."]];
-  if (k === "http_error") return [["bad", `The server rejected this request (HTTP error). With ${n(r.prompt_tokens)} prompt tokens the usual reason is that it does not fit the ${fmt((S.meta.n_ctx || 131072))}-token context window.`]];
-  if (k === "client_disconnect") return [["warn", `${r.from_claude_code ? "Claude Code" : "The client"} closed the connection before the answer finished (after ${fs(r.total_s)}), so the server cancelled the task. The prompt had ${n(r.prompt_tokens)} tokens${r.output_tokens ? `; ${n(r.output_tokens)} tokens had been generated` : lg.pp_samples ? "; it was still prefilling" : ""}.`]];
+  if (k === "http_error") return [["bad", `The server rejected this request (HTTP error).` + (S.meta.n_ctx ? ` With ${n(r.prompt_tokens)} prompt tokens the usual reason is that it does not fit the ${fmt(S.meta.n_ctx)}-token context window of a slot.` : "")]];
+  if (k === "client_disconnect") return [["warn", `${clientLabel(r)} closed the connection before the answer finished (after ${fs(r.total_s)}), so the server cancelled the task. The prompt had ${n(r.prompt_tokens)} tokens${r.output_tokens ? `; ${n(r.output_tokens)} tokens had been generated` : lg.pp_samples ? "; it was still prefilling" : ""}.`]];
   if (k === "cold") {
     out.push(["", `Nothing the server had cached matched this prompt, so all ${n(r.prompt_tokens)} tokens were computed from scratch.`]);
     out.push(["", cost()]);
     const sl = sessionsOf(S.reqs).get(r.session_id || r.id) || [];
     const first = sl.length && sl[0].id === r.id;
-    out.push(["muted", first ? `This is the first request of this conversation (${clientLabel(r)}); the cold prefill is the normal price of starting one.` : r.parent_id ? `It shares only ${n(r.lcp)} tokens with the closest earlier request, so the server had nothing usable, probably because other conversations took both slots in between.` : "This is the first request the tap recorded; the cold prefill is the normal price of starting a session."]);
+    out.push(["muted", first ? `This is the first request of this conversation (${clientLabel(r)}); the cold prefill is the normal price of starting one.` : r.parent_id ? `It shares only ${n(r.lcp)} tokens with the closest earlier request, so the server had nothing usable${(S.meta.n_slots || 1) > 1 ? ", probably because other conversations took every slot in between" : ""}.` : "This is the first request the tap recorded; the cold prefill is the normal price of starting a session."]);
   } else if (k === "warm") {
     out.push(["", `The server reused ${n(reused)} of ${n(r.prompt_tokens)} tokens from a request the tap did not see (probably one sent directly to the server), and computed ${n(fresh)}.`]);
     out.push(["", cost()]);
@@ -519,14 +533,14 @@ function explain(d) {
     out.push(["warn", `The prompt changed before its end: at token ${n(r.diverge_tok)}, in ${secName(r.diverge_section)}${r.changed_added && !r.changed_removed ? `, where this text was added: “${r.changed_added.trim().slice(0, 120)}”` : r.changed_removed && !r.changed_added ? `, where this text was removed: “${r.changed_removed.trim().slice(0, 120)}”` : ch ? " (text changed there)" : ""}.`]);
     out.push(["", `The server could reuse ${n(reused)} tokens (up to the last checkpoint before the change) and had to recompute ${n(fresh)} of ${n(r.prompt_tokens)}.`]);
     out.push(["", cost()]);
-    out.push(["muted", k === "compaction" ? "Compaction shortens the conversation but rewrites it, so the next request pays a re-prefill once." : "On this hybrid model, edits to earlier messages are the expensive case; a plain-attention model would reuse everything up to the change."]);
+    out.push(["muted", k === "compaction" ? "Compaction shortens the conversation but rewrites it, so the next request pays a re-prefill once." : "Plain-attention models reuse everything up to the change; hybrid/recurrent models (DeltaNet or Mamba hybrids) can only restore a checkpoint taken before it, so edits to earlier messages are their expensive case."]);
   } else if (k === "retry") {
     out.push(["", `Identical to an earlier prompt; the server reused ${n(reused)} tokens and computed ${n(fresh)}.`]);
     out.push(["", cost()]);
   } else if (k === "side") {
     out.push(["", `A small request without tools (${r.hint ? `starts with “${r.hint.slice(0, 50)}”` : "for example a session title"}): ${n(r.prompt_tokens)} tokens, ${n(fresh)} computed fresh.`]);
     out.push(["", cost()]);
-    out.push(["muted", r.concurrent_with && r.concurrent_with.length ? "It ran while another request was using the GPU, which is why even a small prompt could take long." : "It took a slot of its own; on this two-slot server the main conversation's cache survived."]);
+    out.push(["muted", r.concurrent_with && r.concurrent_with.length ? "It ran while another request was using the GPU, which is why even a small prompt could take long." : (S.meta.n_slots || 1) > 1 ? `It took a slot of its own; on this ${S.meta.n_slots}-slot server the main conversation's cache can survive it.` : "On a one-slot server a side request evicts the main conversation's cache; the next main-conversation request pays a re-prefill."]);
   }
   if (r.concurrent_with && r.concurrent_with.length && k !== "side") out.push(["muted", `It overlapped in time with ${r.concurrent_with.map(i => "#" + (S.byId[i] || {}).seq).join(", ")}; the GPU was shared, so both were slower than they would be alone.`]);
   if (r.exact === false) out.push(["bad", "Caution: our rendering of this prompt does not have exactly the server's token count, so section boundaries may be slightly off."]);
@@ -540,9 +554,8 @@ function renderHead() {
   h.append(el("div", { class: "title" }, `#${r.seq}`, el("span", { class: `kind k-${kindOf(r)}`, title: kindHelp(r) }, kindLabel(r)), el("span", { class: "muted", style: "font-weight:400" }, `${hms(r.t_request)} · ${fmt(r.prompt_tokens)}-token prompt · ${fmt(r.n_tools)} tools · ${fmt(r.n_messages)} messages${r.slot != null ? " · slot " + r.slot : ""}`)));
   const sessList = (sessionsOf(S.reqs).get(r.session_id || r.id) || []);
   const pos = sessList.findIndex(x => x.id === r.id);
-  h.append(el("div", { class: "muted", style: "margin-top:2px" }, `${clientLabel(r)} · ${sessLabel(r)} · request ${pos + 1} of ${sessList.length} in this conversation`));
+  h.append(el("div", { class: "muted", style: "margin-top:2px" }, `${clientLabel(r)} · ${sessLabel(r)} · request ${pos + 1} of ${sessList.length} in this conversation · ${r.api === "openai" ? "OpenAI chat completions" : "Anthropic Messages"} API`));
   if (!AGENTS.includes(r.client_name)) h.append(el("p", { class: "warn", style: "margin:6px 0 0" }, `Sent by ${r.client}: a test or script rather than a coding agent, so its prompt says nothing about what your agent sends.`));
-  if (false) h.append(el("div", {}, el("span", {}, "")));
   const ex = el("div", { class: "explain" });
   explain(d).forEach(([cls, text], i) => ex.append(el("p", { class: (i === 0 ? "verdict " : "") + cls }, text)));
   h.append(ex);
@@ -570,13 +583,14 @@ function renderBudget(p, d) {
   const facts = [];
   if (tools && tools.tokens) {
     const top = [...tools.children].filter(c => c.kind === "tool").sort((a, b) => b.tokens - a.tokens);
-    facts.push(`Tool definitions are ${tools.pct.toFixed(0)}% of the prompt (${fmt(d.n_tools)} tools). The largest ${top.length > 1 ? "are" : "is"} ${top.slice(0, 3).map(t => `${t.label} (${fmt(t.tokens)})`).join(", ")}. They are the same on every request, so they are paid once per session and reused afterwards; removing a large unused tool (for example with LOCAL_LLM_DISALLOWED_TOOLS) shortens every cold start.`);
+    facts.push(`Tool definitions are ${tools.pct.toFixed(0)}% of the prompt (${fmt(d.n_tools)} tools). The largest ${top.length > 1 ? "are" : "is"} ${top.slice(0, 3).map(t => `${t.label} (${fmt(t.tokens)})`).join(", ")}. They are the same on every request, so they are paid once per session and reused afterwards; removing a large unused tool (your client's tool allow/deny setting) shortens every cold start.`);
   }
   if (msgs && msgs.children.length) {
     const big = [...msgs.children].sort((a, b) => b.tokens - a.tokens)[0];
     facts.push(`The conversation is ${msgs.pct.toFixed(0)}%; its largest message is ${big.label} with ${fmt(big.tokens)} tokens${big.role === "system" ? " (a system message inside the conversation: environment, CLAUDE.md, memory)" : ""}.`);
   }
-  if (d.raw && d.raw.overhead != null) facts.push(`The chat template adds ${fmt(d.raw.overhead)} tokens on top of the raw text Claude Code sent (XML around tool schemas, turn markers): the “raw Δ” column shows it per section.`);
+  if (d.raw && d.raw.overhead != null) facts.push(`The chat template adds ${fmt(d.raw.overhead)} tokens on top of the raw text the client sent (markup around tool schemas, turn markers): the “raw Δ” column shows it per section.`);
+  if (d.profile === "generic") facts.push("Section boundaries are approximate to the template's turn markers: this chat template has no dedicated profile, so each section is located by searching for its text and runs until the next one starts (the token counts still add up exactly).");
   if (facts.length) p.append(el("div", { class: "note" }, ...facts.map(f => el("p", { style: "margin:3px 0" }, f))));
   const row = el("div", { class: "row" },
     el("button", { class: "btn" + (S.rawMode ? "" : " on"), onclick: () => { S.rawMode = false; renderPanel(); } }, "rendered tokens"),
@@ -587,7 +601,7 @@ function renderBudget(p, d) {
   p.append(row);
   p.append(el("div", { class: "hdr" }, el("span"), el("span", {}, "section"), el("span", { title: "tokens of this section in the rendered prompt" }, "tokens"), el("span", { title: "share of the whole prompt" }, "%"),
     el("span", { title: "position of the section's first token; everything before the first change can be reused" }, "starts at"),
-    el("span", { title: S.rawMode ? "tokens of the raw text/JSON Claude Code sent, before the chat template" : "rendered minus raw: tokens the chat template added" }, S.rawMode ? "raw" : "raw Δ"), el("span", {}, "")));
+    el("span", { title: S.rawMode ? "tokens of the raw text/JSON the client sent, before the chat template" : "rendered minus raw: tokens the chat template added" }, S.rawMode ? "raw" : "raw Δ"), el("span", {}, "")));
   const tree = el("div", { class: "tree" });
   const maxTok = Math.max(1, ...groups.map(g => g.tokens));
   const mk = (n, depth, parentMax) => {
@@ -622,10 +636,12 @@ function renderBudget(p, d) {
       `Waited ${fs(L.queue_wait_s, 2)} for the slot, prefilled ${fmt(L.pp_tokens)} tokens in ${fs(L.pp_s)} (${Math.round(L.pp_rate || 0)} tok/s), generated ${fmt(L.tg_tokens)} tokens at ${(L.tg_rate || 0).toFixed(1)} tok/s. ` +
       `The slot now holds ${fmt(L.n_tokens_final)} tokens.` + (L.evictions_mib && L.evictions_mib.length ? ` The host prompt cache evicted ${L.evictions_mib.map(x => x.toFixed(0) + " MiB").join(", ")} to make room.` : "")));
   }
-  if (d.usage) {
+  if (d.usage && (d.usage.total != null || d.usage.output_tokens != null)) {
     const u = d.usage, ex = d.exact || {};
+    const raw = (d.usage_raw || {}).fields || {};
+    const src = d.api === "openai" ? `prompt_tokens ${fmt(raw.prompt_tokens)}, cached ${fmt(u.cached)}${(d.usage_raw || {}).timings ? " (with llama.cpp timings)" : ""}` : `input_tokens ${fmt(raw.input_tokens)}, cache_read_input_tokens ${fmt(raw.cache_read_input_tokens)}`;
     p.append(el("h3", {}, "what the response reported"));
-    p.append(el("div", { class: "muted" }, `input_tokens ${fmt(u.input_tokens)} (the fresh part), cache_read_input_tokens ${fmt(u.cache_read_input_tokens)} (reused), output_tokens ${fmt(u.output_tokens)}${u.output_tokens_estimated ? " (estimated)" : ""}. Our rendering has ${fmt(ex.n_rendered)} tokens: ${ex.usage === true ? "exactly the server's count." : ex.usage === false ? `differs by ${ex.delta}.` : "not comparable yet."}`));
+    p.append(el("div", { class: "muted" }, `${src}: a ${fmt(u.total)}-token prompt, ${fmt(u.cached)} reused and ${fmt(u.uncached)} computed fresh; ${fmt(u.output_tokens)} output tokens${u.output_estimated ? " (estimated from the number of stream chunks; the stream carried no usage)" : ""}${u.prefill_ms != null ? `; prefill ${fs(u.prefill_ms / 1000, 2)}` : ""}${u.decode_rate != null ? `, decode ${u.decode_rate.toFixed(1)} tokens/s` : ""}. Our rendering has ${fmt(ex.n_rendered)} tokens: ${ex.usage === true ? "exactly the server's count." : ex.usage === false ? `differs by ${ex.delta}.` : "not comparable (no prompt count in the response)."}`));
   }
   p.append(el("h3", {}, "one-line summary"));
   p.append(el("div", { class: "summary" }, d.summary_row.summary));
@@ -749,14 +765,15 @@ async function renderDiff(p, d) {
 
 // ---------------------------------------------------------------- raw
 async function renderRaw(p, d) {
-  p.append(el("p", { class: "intro" }, "The request exactly as Claude Code sent it (the JSON body, with credentials removed) and the response stream from the server, for checking details the views above summarize."));
+  p.append(el("p", { class: "intro" }, "The request exactly as the client sent it (the JSON body, with credentials removed) and the response from the server, for checking details the views above summarize."));
   const box = el("div");
   p.append(el("div", { class: "row" },
     el("button", { class: "btn", onclick: async () => { const r = await fetch(`/api/requests/${d.id}/body`); box.innerHTML = ""; box.append(el("pre", { class: "raw" }, JSON.stringify(await r.json(), null, 1))); } }, "request body (JSON)"),
-    el("button", { class: "btn", onclick: async () => { const r = await fetch(`/api/requests/${d.id}/sse`); box.innerHTML = ""; box.append(el("pre", { class: "raw" }, (await r.json()).join("\n"))); } }, "response stream (SSE)"),
-    el("button", { class: "btn", onclick: () => { box.innerHTML = ""; box.append(el("pre", { class: "raw" }, JSON.stringify({ timing: d.timing, usage: d.usage, log: d.log, exact: d.exact, flags: d.flags, meta: d.meta }, null, 1))); } }, "timing, usage and log (JSON)")));
+    el("button", { class: "btn", onclick: async () => { const r = await fetch(`/api/requests/${d.id}/sse`); box.innerHTML = ""; box.append(el("pre", { class: "raw" }, (await r.json()).join("\n"))); } }, "response (SSE stream or JSON)"),
+    el("button", { class: "btn", onclick: () => { box.innerHTML = ""; box.append(el("pre", { class: "raw" }, JSON.stringify({ timing: d.timing, usage: d.usage, usage_raw: d.usage_raw, log: d.log, exact: d.exact, flags: d.flags, meta: d.meta }, null, 1))); } }, "timing, usage and log (JSON)")));
   p.append(box);
-  p.append(el("p", { class: "muted" }, `Files: tmp/trace/${d.id}.json (trace) and tmp/trace/${d.id}.analysis.json (analysis). The same information is printed by bin/trace.py --dump ${d.seq}.`));
+  const dir = S.meta.trace_dir || ".", pkg = S.meta.package || "kvprof";
+  p.append(el("p", { class: "muted" }, `Files: ${dir}/${d.id}.json (trace) and ${dir}/${d.id}.analysis.json (analysis). The same information is printed by ${pkg} analyze --trace-dir ${dir} --dump ${d.seq}.`));
 }
 
 // ---------------------------------------------------------------- keys / hash
