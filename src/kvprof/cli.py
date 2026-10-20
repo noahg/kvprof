@@ -1,4 +1,4 @@
-"""Command line: tap | analyze | serve | calibrate | doctor."""
+"""Command line: start | tap | analyze | serve | calibrate | doctor."""
 import argparse
 import sys
 
@@ -9,15 +9,15 @@ from .config import (DEFAULT_GUI_HOST, DEFAULT_GUI_PORT, DEFAULT_LISTEN, DEFAULT
 DESCRIPTION = f"""\
 Prompt-cache profiler for llama.cpp's llama-server: why did it re-prefill my prompt?
 
-  %(prog)s tap        record requests between your client and llama-server
+  %(prog)s start      record requests and explain them live in a browser (tap + serve in one)
+  %(prog)s tap        only record requests between your client and llama-server
   %(prog)s analyze    one line per request: what changed, what it cost, why
-  %(prog)s serve      the same, live, in a browser
+  %(prog)s serve      only the browser view, over traces already recorded
   %(prog)s doctor     check the server exposes everything the analyzer needs
 
 Typical session:
-  %(prog)s tap --upstream {DEFAULT_UPSTREAM}
+  %(prog)s start --server-log server.log                                # llama-server at {DEFAULT_UPSTREAM}
   ANTHROPIC_BASE_URL=http://{DEFAULT_LISTEN} claude                     # or any OpenAI client at http://{DEFAULT_LISTEN}/v1
-  %(prog)s analyze --upstream {DEFAULT_UPSTREAM} --server-log server.log
 """
 
 
@@ -26,7 +26,7 @@ def _common(p, upstream=True, trace_dir=True):
         p.add_argument("--upstream", metavar="URL", help=f"llama-server base URL (default {DEFAULT_UPSTREAM}; env {env_name('upstream')})")
         p.add_argument("--api-key", metavar="KEY", help=f"sent as Bearer / x-api-key if the server needs one (env {env_name('api_key')})")
     if trace_dir:
-        p.add_argument("--trace-dir", metavar="DIR", help=f"where traces live (default ./{DEFAULT_TRACE_DIR}; env {env_name('trace_dir')})")
+        p.add_argument("--trace-dir", metavar="DIR", help=f"where traces live (default ./{DEFAULT_TRACE_DIR} if it exists, else a per-user directory; env {env_name('trace_dir')})")
 
 
 def _analysis_opts(p):
@@ -40,18 +40,36 @@ def _analysis_opts(p):
     p.add_argument("--refresh", action="store_true", default=None, help="ignore cached analyses")
 
 
+def _tap_opts(p):
+    p.add_argument("--listen", metavar="HOST:PORT", help=f"address the client connects to (default {DEFAULT_LISTEN})")
+    p.add_argument("--record-paths", metavar="PATHS", help=f"comma-separated request paths to record (default {','.join(DEFAULT_RECORD_PATHS)})")
+    p.add_argument("--quiet", action="store_true", default=None, help="do not log pass-through requests")
+
+
+def _gui_opts(p):
+    p.add_argument("--host", help=f"GUI address (default {DEFAULT_GUI_HOST})")
+    p.add_argument("--port", type=int, help=f"GUI port (default {DEFAULT_GUI_PORT})")
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog=PACKAGE_NAME, description=DESCRIPTION, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = ap.add_subparsers(dest="cmd", metavar="COMMAND")
 
+    p = sub.add_parser("start", help="tap and web GUI together: the one command most sessions need",
+                       description="Runs the tap and the web GUI in one process and opens the GUI. llama-server may be started "
+                                   "before or after; the page says what it is waiting for.")
+    _analysis_opts(p)
+    _tap_opts(p)
+    _gui_opts(p)
+    p.add_argument("--no-open", action="store_true", help="do not open the GUI in a browser")
+    p.add_argument("--exit-with-parent", action="store_true", help="stop when the launching process exits (for app wrappers)")
+
     p = sub.add_parser("tap", help="record requests passing between a client and llama-server",
                        description="A passive byte relay: bytes pass through unchanged; POSTs to the recorded paths are written "
                                    "to the trace directory as one JSON file per request.")
     _common(p)
-    p.add_argument("--listen", metavar="HOST:PORT", help=f"address the client connects to (default {DEFAULT_LISTEN})")
-    p.add_argument("--record-paths", metavar="PATHS", help=f"comma-separated request paths to record (default {','.join(DEFAULT_RECORD_PATHS)})")
-    p.add_argument("--quiet", action="store_true", default=None, help="do not log pass-through requests")
+    _tap_opts(p)
 
     p = sub.add_parser("analyze", help="explain each recorded request's prefill cost")
     _analysis_opts(p)
@@ -61,8 +79,7 @@ def build_parser():
 
     p = sub.add_parser("serve", help="live web GUI over the trace directory")
     _analysis_opts(p)
-    p.add_argument("--host", help=f"GUI address (default {DEFAULT_GUI_HOST})")
-    p.add_argument("--port", type=int, help=f"GUI port (default {DEFAULT_GUI_PORT})")
+    _gui_opts(p)
 
     p = sub.add_parser("calibrate", help="(re)derive the Anthropic->OpenAI conversion details from the server")
     _common(p)
@@ -96,6 +113,11 @@ def cmd_analyze(s, a):
         print_session(p, a.last, a.json)
 
 
+def cmd_start(s, a):
+    from .start import run_start
+    sys.exit(run_start(s, open_browser=not a.no_open, exit_with_parent=a.exit_with_parent))
+
+
 def cmd_serve(s, a):
     from .serve import serve
     p = _pipeline(s, verbose=False)
@@ -105,9 +127,9 @@ def cmd_serve(s, a):
 def cmd_calibrate(s, a):
     from .backends import get_backend
     from .convert import calibrate
-    from .store import TraceStore
+    from .store import store_for
     backend = get_backend(s.backend, upstream=s.upstream, api_key=s.api_key)
-    store = TraceStore(s.trace_dir)
+    store = store_for(s, backend.server_info().model_path)
     extra = []
     for tid in store.list_ids()[:1]:
         try:
@@ -139,4 +161,4 @@ def main(argv=None):
         ap.print_help()
         return
     s = resolve(a)
-    {"tap": cmd_tap, "analyze": cmd_analyze, "serve": cmd_serve, "calibrate": cmd_calibrate, "doctor": cmd_doctor}[a.cmd](s, a)
+    {"start": cmd_start, "tap": cmd_tap, "analyze": cmd_analyze, "serve": cmd_serve, "calibrate": cmd_calibrate, "doctor": cmd_doctor}[a.cmd](s, a)

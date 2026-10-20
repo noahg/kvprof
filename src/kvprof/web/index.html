@@ -26,6 +26,7 @@ header h1 { font-size: 14px; margin: 0; font-weight: 600; }
 header .sub { color: var(--muted); }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #aaa; margin-right: 4px; vertical-align: -1px; }
 .dot.live { background: #2f9e5b; box-shadow: 0 0 0 3px rgba(47,158,91,.2); }
+.dot.wait { background: var(--warnc); box-shadow: 0 0 0 3px rgba(226,137,27,.2); }
 label.toggle { color: var(--muted); cursor: pointer; margin-left: auto; white-space: nowrap; }
 main { display: grid; grid-template-columns: minmax(600px, 1.45fr) minmax(380px, 1fr); gap: 0; height: calc(100vh - 42px); }
 #left { overflow: auto; border-right: 1px solid var(--line); }
@@ -141,6 +142,13 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: v
 .ctx .capt { color: var(--muted); font-size: 11px; margin-bottom: 3px; }
 pre.raw { margin: 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11.5px; max-height: 70vh; overflow: auto; }
 .empty { color: var(--muted); padding: 30px; text-align: center; max-width: 60ch; margin: 0 auto; }
+.setup { padding: 10px 14px 0; max-width: 80ch; }
+#left.fresh section.block { display: none; }   /* nothing recorded yet: the setup steps come first, the empty views go */
+.setup .step { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 8px; }
+.setup .step h3 { margin: 0 0 4px; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--ink); }
+.setup p { margin: 4px 0; }
+.cmd { display: flex; align-items: center; gap: 8px; background: var(--bg); border-radius: 6px; padding: 5px 8px; margin: 4px 0; }
+.cmd code { flex: 1; overflow-wrap: anywhere; user-select: all; }
 kbd { font: 11px var(--mono); border: 1px solid var(--line2); border-radius: 3px; padding: 0 4px; }
 dl.gloss { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 6px 0 0; }
 dl.gloss dt { font-weight: 600; white-space: nowrap; }
@@ -156,6 +164,7 @@ dl.gloss dd { margin: 0; color: var(--muted); }
 </header>
 <main>
   <section id="left">
+    <div class="setup" id="empty"></div>
     <details class="intro" id="howto">
       <summary>How to read this page</summary>
       <div class="body">
@@ -215,7 +224,6 @@ dl.gloss dd { margin: 0; color: var(--muted); }
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
-    <div class="empty" id="empty">No requests yet. Start <span class="mono">kvprof tap --upstream http://127.0.0.1:8080</span>, then point a client at it: <span class="mono">ANTHROPIC_BASE_URL=http://127.0.0.1:8081 claude</span>, or an OpenAI client with <span class="mono">OPENAI_BASE_URL=http://127.0.0.1:8081/v1</span> (OpenCode: <span class="mono">provider.&lt;name&gt;.options.baseURL</span>). Requests appear here as they happen.</div>
   </section>
 
   <aside id="detail">
@@ -293,7 +301,7 @@ async function poll() {
     const prev = S.selected && S.byId[S.selected] ? S.byId[S.selected] : null;
     S.reqs = d.requests; S.byId = Object.fromEntries(d.requests.map(x => [x.id, x]));
     setLive(true);
-    renderHeader(); renderSession(); renderGantt(); renderTable();
+    renderHeader(); renderSession(); renderGantt(); renderTable(); renderSetup();
     if (S.follow && S.reqs.length) {
       const last = S.reqs[S.reqs.length - 1].id;
       if (last !== S.selected) select(last, false);
@@ -302,17 +310,48 @@ async function poll() {
     if (cur && prev && (cur.stage !== prev.stage || cur.log_match !== prev.log_match || cur.kind !== prev.kind)) loadDetail(S.selected);
   } catch (e) { setLive(false); }
 }
-function setLive(on) { S.live = on; const d = $("#dot"); if (d) d.className = "dot" + (on ? " live" : ""); }
+const dotClass = () => "dot" + (!S.live ? "" : S.meta.upstream_ok === false ? " wait" : " live");
+function setLive(on) { S.live = on; const d = $("#dot"); if (d) d.className = dotClass(); }
+
+// ---------------------------------------------------------------- first run: what to start and where to point the client
+function command(text) {
+  const b = el("button", { class: "btn", onclick: async () => {
+    try { await navigator.clipboard.writeText(text); b.textContent = "copied"; } catch (e) { b.textContent = "select the text"; }
+    setTimeout(() => { b.textContent = "copy"; }, 1500);
+  } }, "copy");
+  return el("div", { class: "cmd" }, el("code", { class: "mono" }, text), b);
+}
+function renderSetup() {
+  const box = $("#empty"), m = S.meta;
+  if (S.reqs.length) return;
+  const sig = JSON.stringify([m.upstream_ok, m.upstream, m.tap_url, m.has_log, m.model]);
+  if (box.dataset.sig === sig) return;   // keep the DOM (and a text selection) between polls
+  box.dataset.sig = sig; box.innerHTML = "";
+  const pkg = m.package || "kvprof", up = m.upstream || "http://127.0.0.1:8080", tap = m.tap_url || "http://127.0.0.1:8081";
+  const step = (title, ...kids) => el("div", { class: "step" }, el("h3", {}, title), ...kids);
+  if (m.upstream_ok === false) box.append(step(`Waiting for llama-server at ${up}`,
+    el("p", {}, "It is not answering yet. Start it; this page notices by itself. The log file is what gives server-side prefill and decode times."),
+    command("llama-server -m <model.gguf> --log-file server.log")));
+  else box.append(step(`llama-server is connected${m.model ? ": " + m.model : ""}`));
+  if (!m.tap_url) box.append(step("Start the tap", el("p", {}, "This page only reads traces; the tap records them."), command(`${pkg} tap --upstream ${up}`)));
+  box.append(step("Point your client at the tap",
+    el("p", {}, "Claude Code:"), command(`ANTHROPIC_BASE_URL=${tap} claude`),
+    el("p", {}, "Any OpenAI client (OpenCode: set provider.<name>.options.baseURL to this URL):"), command(`OPENAI_BASE_URL=${tap}/v1`),
+    el("p", { class: "muted" }, "Requests appear here as they happen.")));
+  if (!m.has_log) box.append(el("p", { class: "muted" }, `No server log: prefill and decode times and the slot each request used will be missing. Start llama-server with --log-file server.log and ${pkg} with --server-log server.log to get them.`));
+}
 
 // ---------------------------------------------------------------- header / session summary
 const median = xs => { const v = xs.filter(x => x != null && isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const h = v.length >> 1; return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2; };
 function renderHeader() {
   const m = S.meta;
   const pkg = m.package || "kvprof";
-  document.title = `${pkg} · ${m.model || "?"}`; $("#title").textContent = pkg;
-  const anchor = !m.has_log ? "no server log (start serve with --server-log)" : m.anchor ? `server log aligned via ${m.anchor_src}` : "server log not aligned";
+  document.title = m.model ? `${pkg} · ${m.model}` : pkg; $("#title").textContent = pkg;
+  const anchor = !m.has_log ? "no server log (pass --server-log)" : m.anchor ? `server log aligned via ${m.anchor_src}` : "server log not aligned";
   const build = m.build ? ` ${String(m.build).split("-")[0]}` : "";
-  $("#hmeta").innerHTML = `<span class="dot${S.live ? " live" : ""}" id="dot"></span>${esc(m.model || "?")} · ${esc(m.backend || "")}${esc(build)}${m.n_slots != null ? ` · ${m.n_slots} slot${m.n_slots === 1 ? "" : "s"} × ${fmt(m.n_ctx)} tokens` : ""} · template ${esc(m.profile || "?")} · ${anchor}`;
+  const away = m.upstream_ok === false ? `<span class="warn">llama-server at ${esc(m.upstream || "?")} is not answering</span>` : "";
+  const server = m.ready === false ? away : `${esc(m.model || "?")} · ${esc(m.backend || "")}${esc(build)}${m.n_slots != null ? ` · ${m.n_slots} slot${m.n_slots === 1 ? "" : "s"} × ${fmt(m.n_ctx)} tokens` : ""} · template ${esc(m.profile || "?")} · ${anchor}${away ? " · " + away : ""}`;
+  $("#hmeta").innerHTML = `<span class="${dotClass()}" id="dot"></span>${server}`;
   // numbers the intro quotes, measured on this server
   const ok = S.reqs.filter(r => r.outcome === "ok");
   const pp = median(ok.filter(r => (r.prefilled || 0) >= 512).map(r => r.pp_rate)), tg = median(ok.map(r => r.tg_rate));
@@ -433,7 +472,7 @@ function renderTable() {
   renderChips();
   const tb = $("#rows"); tb.innerHTML = "";
   const reqs = visible();
-  $("#empty").style.display = S.reqs.length ? "none" : "";
+  $("#empty").style.display = S.reqs.length ? "none" : ""; $("#left").classList.toggle("fresh", !S.reqs.length);
   $("#reqs").style.display = S.reqs.length ? "" : "none";
   const maxP = Math.max(1, ...S.reqs.map(r => r.prompt_tokens || 0));
   const sessions = sessionsOf(reqs);

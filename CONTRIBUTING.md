@@ -48,6 +48,41 @@ A profile builds the section tree for one family of chat templates (`src/kvprof/
 
 See [docs/backends.md](docs/backends.md).
 
+## Packaging
+
+Three things are built from the wheel, all by scripts that also run in CI:
+
+```sh
+uv build                                   # dist/kvprof-<version>-py3-none-any.whl
+packaging/build-runtime.sh macos arm64     # the wheel inside a pinned standalone Python: build/runtime/…, dist/….tar.gz
+macos/build-app.sh                         # build/app/<arch>/kvprof.app around that runtime, ad-hoc signed
+macos/sign-and-notarize.sh                 # dist/kvprof-<version>-macos-<arch>.dmg
+packaging/smoke.sh build/runtime/kvprof-*-macos-arm64/bin/kvprof
+```
+
+- The runtime is what `packaging/install.sh` downloads and what the app embeds. Its Python is pinned in
+  `packaging/python.lock` (python-build-standalone); to update, change the tag, the version and the four digests.
+- The app (`macos/Sources/KvprofApp`) only supervises `kvprof start --exit-with-parent` and reads its
+  `/api/status`; anything the menu shows should come from there, not from a second implementation in Swift.
+- Nothing may write into the app bundle at run time (it is signed): the launcher runs Python with `-B` and the
+  bytecode is compiled at build time.
+- `SIGN_IDENTITY="Developer ID Application: … (TEAMID)" NOTARY_PROFILE=<profile> macos/sign-and-notarize.sh`
+  signs with the hardened runtime, notarizes and staples. Without them the disk image is ad-hoc signed, for local use.
+- `swift macos/make-icon.swift` redraws `macos/AppIcon.icns`.
+
+## Releasing
+
+1. Set `__version__` in `src/kvprof/__init__.py`, date the CHANGELOG entry, commit.
+2. Rehearse: push a tag like `v0.2.0rc1` (with `__version__ = "0.2.0rc1"`). The release workflow publishes to
+   TestPyPI and creates a draft prerelease with every artifact.
+3. Push `vX.Y.Z`. The workflow tests, builds the wheel, the Linux and macOS runtimes and the signed, notarized disk
+   images, publishes to PyPI (trusted publishing), creates the GitHub release with `SHA256SUMS` and `install.sh`,
+   and regenerates the cask in `noahg/homebrew-kvprof` from `packaging/homebrew/kvprof.rb.in`.
+
+Repository secrets the workflow reads: `MACOS_SIGN_IDENTITY`, `MACOS_CERTIFICATE_P12` (base64),
+`MACOS_CERTIFICATE_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `HOMEBREW_TAP_TOKEN`. PyPI and
+TestPyPI need this repository's `release.yml` (environment `pypi`) registered as a trusted publisher.
+
 ## Style
 
 Match the surrounding code: short functions, comments that say why, no new dependencies.

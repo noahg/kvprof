@@ -1,6 +1,7 @@
 """Live web GUI: a small JSON API over the Pipeline plus one static page (web/index.html)."""
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -11,14 +12,38 @@ from importlib import resources
 from . import PACKAGE_NAME, __version__
 from .diff import diff_analysis
 from .sections import find_node
+from .store import TraceStore
 from .summarize import summarize
 from .util import display_path
 
 _SLIM_DROP = ("ids", "bstart", "rendered")
 
 
+class Live:
+    """What the server shows: the pipeline (None until the upstream has answered once) and, under `start`,
+    the tap's address and whether the upstream answers right now."""
+
+    def __init__(self, settings, pipeline=None, tap_url=None):
+        self.settings, self.pipeline, self.tap_url = settings, pipeline, tap_url
+        self.gui_url = None
+        self.upstream_ok = pipeline is not None
+        self.upstream_error = None
+
+
 def index_html():
     return resources.files(__package__).joinpath("web/index.html").read_bytes()
+
+
+def status(live):
+    """The state of the whole setup, pipeline or not: the page's first-run panel and the macOS app read this."""
+    s, p = live.settings, live.pipeline
+    trace_dir = p.store.trace_dir if p else s.trace_dir
+    return {"package": PACKAGE_NAME, "version": __version__, "pid": os.getpid(), "ready": p is not None,
+            "upstream": s.upstream, "upstream_ok": live.upstream_ok, "upstream_error": live.upstream_error,
+            "tap_url": live.tap_url, "gui_url": live.gui_url, "trace_dir": display_path(trace_dir), "trace_path": os.path.abspath(trace_dir),
+            "has_log": p.telemetry is not None if p else bool(s.use_log and s.server_log),
+            "model": p.info.model_name if p else None, "build": p.info.build if p else None,
+            "n_requests": len(p.analyses) if p else len(TraceStore(trace_dir).list_ids())}
 
 
 def meta(p):
@@ -36,7 +61,7 @@ def meta(p):
 
 
 class Handler(BaseHTTPRequestHandler):
-    pipeline = None
+    live = None
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
@@ -64,21 +89,29 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         parts = [x for x in u.path.split("/") if x]
-        p = self.pipeline
+        live = self.live
+        p = live.pipeline
         try:
             if not parts or parts == ["index.html"]:
                 return self._send(200, index_html(), "text/html; charset=utf-8")
             if parts[0] != "api" or len(parts) < 2:
                 return self._send(404, '{"error":"not found"}')
+            if parts[1:] == ["status"]:
+                return self._json(status(live))
             if parts[1:] == ["requests"]:
-                with p.lock:
-                    payload = meta(p)
-                    payload["requests"] = [summarize(a) for a in p.analyses]
+                payload = status(live)
+                payload["requests"] = []
+                if p is not None:
+                    with p.lock:
+                        payload.update(meta(p))
+                        payload["requests"] = [summarize(a) for a in p.analyses]
                 etag = '"' + hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest() + '"'
                 if self.headers.get("If-None-Match") == etag:
                     self.send_response(304); self.send_header("ETag", etag); self.send_header("Content-Length", "0"); self.end_headers()
                     return
                 return self._json(payload, etag)
+            if p is None:
+                return self._send(404, '{"error":"unknown request"}')
             if len(parts) >= 3 and parts[1] == "requests":
                 with p.lock:
                     a = p.by_id.get(parts[2])
@@ -129,17 +162,31 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 
-def make_handler(pipeline):
-    return type("BoundHandler", (Handler,), {"pipeline": pipeline})
+def make_handler(live):
+    """A handler class bound to a Live (or to a Pipeline, which is wrapped in one)."""
+    if not isinstance(live, Live):
+        live = Live(live.settings, live)
+    return type("BoundHandler", (Handler,), {"live": live})
+
+
+def make_server(live, host, port):
+    httpd = ThreadingHTTPServer((host, port), make_handler(live))
+    httpd.daemon_threads = True
+    return httpd
+
+
+def scan_once(p):
+    """Re-analyze when a trace or the server log changed."""
+    fp = p.fingerprint()
+    if fp != p.last_fingerprint:
+        p.refresh_all()
+        p.last_fingerprint = fp
 
 
 def scan_loop(p, stop_event=None, interval=1.0):
     while not (stop_event and stop_event.is_set()):
         try:
-            fp = p.fingerprint()
-            if fp != p.last_fingerprint:
-                p.refresh_all()
-                p.last_fingerprint = fp
+            scan_once(p)
         except Exception as e:
             print(f"scan error: {e!r}", file=sys.stderr)
         time.sleep(interval)
@@ -147,8 +194,7 @@ def scan_loop(p, stop_event=None, interval=1.0):
 
 def serve(p, host, port):
     threading.Thread(target=scan_loop, args=(p,), daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), make_handler(p))
-    httpd.daemon_threads = True
+    httpd = make_server(p, host, port)
     trace_dir = display_path(p.store.trace_dir)
     print(f"{PACKAGE_NAME} GUI: http://{host}:{httpd.server_address[1]}/   (traces in {trace_dir}; Ctrl-C to stop)", flush=True)
     if p.telemetry is None:

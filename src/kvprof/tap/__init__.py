@@ -13,11 +13,11 @@ from .recorder import TapContext
 from .relay import serve_relay
 
 
-def run_tap(settings, ready_event=None, stop_event=None, info=None):
+def run_tap(settings, ready_event=None, stop_event=None, info=None, locate=None):
     listen = parse_addr(settings.listen, 8081)
     upstream = parse_addr(settings.upstream, 8080)
     os.makedirs(settings.trace_dir, exist_ok=True)
-    ctx = TapContext(settings.trace_dir, settings.record_paths, settings.quiet)
+    ctx = TapContext(settings.trace_dir, settings.record_paths, settings.quiet, locate=locate)
     info = {} if info is None else info
 
     def on_listen(addr):

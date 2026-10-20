@@ -2,12 +2,25 @@
 conversion (.conversion.json) and the raw-text token-count cache (.rawcache.json)."""
 import hashlib
 import os
+import re
 import threading
 
 from .util import load_json, save_json_atomic
 
 CONVERSION_FILE = ".conversion.json"
 RAWCACHE_FILE = ".rawcache.json"
+
+
+def model_dir(root, model_path):
+    """The subdirectory of a per-model trace root for one model: an analysis only holds for the model that
+    served the request, so a root shared across model changes keeps each model's traces apart."""
+    name = os.path.splitext(os.path.basename(model_path or ""))[0]
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "model"
+    return os.path.join(root, f"{slug}-{hashlib.sha256((model_path or '').encode('utf-8')).hexdigest()[:8]}")
+
+
+def store_for(settings, model_path):
+    return TraceStore(model_dir(settings.trace_dir, model_path) if settings.per_model else settings.trace_dir)
 
 
 class TraceStore:

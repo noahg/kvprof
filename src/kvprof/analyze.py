@@ -11,7 +11,7 @@ from .diff import classify, diff_analysis
 from .request import Request, client_info, detect_api
 from .sections import add_raw_counts, assign_tokens, build_sections
 from .sections.profiles import PROFILES, detect_profile
-from .store import RawCache, TraceStore
+from .store import RawCache, store_for
 from .usage import upgrade_schema1_usage
 from .util import byte_starts, char_to_byte_table, lcp_len
 
@@ -170,11 +170,11 @@ class Pipeline:
         self.settings = settings
         self.verbose = verbose
         self.backend = backend or get_backend(settings.backend, upstream=settings.upstream, api_key=settings.api_key)
-        self.store = store or TraceStore(settings.trace_dir)
         self.info = self.backend.server_info()
         if "props_error" in self.info.extra and not self.info.model_path:
             raise UpstreamUnavailable(f"cannot reach {settings.upstream}: {self.info.extra['props_error']}")
         self.model_path = self.info.model_path
+        self.store = store or store_for(settings, self.model_path)
         self.model = settings.model or self.backend.default_model()
         tp = settings.template_profile or "auto"
         if tp != "auto" and tp not in PROFILES:

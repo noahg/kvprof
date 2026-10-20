@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 dist/
 build/
+macos/.build/
 *.egg-info/
 .pytest_cache/
 # traces hold full prompts (repository contents, secrets you pasted); never commit them

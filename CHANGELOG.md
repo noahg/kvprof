@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- `kvprof start`: the tap and the GUI in one process, with the GUI opened in the browser. It starts whether or not
+  llama-server is up, attaches the analyzer when the server answers, re-attaches when it comes back with another
+  model, and keeps what was analyzed when it goes away. A second `kvprof start` opens the running one's GUI.
+- GUI: a first-run panel with the state of llama-server and the client settings for the tap's real address;
+  `/api/status`.
+- macOS menu-bar app (`kvprof.app`, in a disk image): runs `kvprof start` in the background with its own Python,
+  shows whether it is recording or waiting for llama-server, opens the dashboard, copies the client settings, and
+  can start at login.
+- Self-contained runtime for macOS and Linux and an install script (`curl … | sh`) that needs no Python; a Homebrew
+  cask; a release workflow that publishes to PyPI and GitHub.
+- Default trace directory: `./.kvprof` when it exists, else a per-user directory with one subdirectory per model
+  (`kvprof tap` alone still records into `./.kvprof`). `KVPROF_DATA_DIR` moves the per-user directory.
+
 ## 0.1.0 (2026-09-29)
 
 First release, extracted from a private llama-server setup where it was used to trace Claude Code sessions.

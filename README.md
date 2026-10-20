@@ -26,10 +26,27 @@ Stdlib-only Python (3.11+), no build step for the GUI.
 
 ## Install
 
+**macOS app.** Download the disk image from the [latest release](https://github.com/noahg/kvprof/releases/latest)
+(`macos-arm64` for Apple Silicon, `macos-x86_64` for Intel), drag kvprof to Applications and open it. It needs
+nothing else installed. kvprof sits in the menu bar, records and analyzes in the background, and its menu opens the
+dashboard and copies the client settings. Or with Homebrew, which also puts `kvprof` on your PATH:
+
 ```sh
+brew install --cask noahg/kvprof/kvprof
+```
+
+**Command line, nothing else needed** (macOS and Linux; brings its own Python):
+
+```sh
+curl -LsSf https://github.com/noahg/kvprof/releases/latest/download/install.sh | sh
+```
+
+**With Python 3.11+:**
+
+```sh
+uvx kvprof start              # run it without installing
 uv tool install kvprof        # or: pipx install kvprof
-# from a checkout:
-uv tool install .
+uv tool install .             # from a checkout
 ```
 
 ## Quickstart
@@ -38,9 +55,14 @@ Start llama-server as usual (the examples assume its default `http://127.0.0.1:8
 file, e.g. `llama-server ... --log-file server.log` or `llama-server ... 2> server.log`.
 
 ```sh
-kvprof doctor --upstream http://127.0.0.1:8080 --server-log server.log   # does the server expose what kvprof needs?
-kvprof tap --upstream http://127.0.0.1:8080                               # listens on 127.0.0.1:8081, records into ./.kvprof/
+kvprof start --server-log server.log     # tap on 127.0.0.1:8081, GUI at http://127.0.0.1:8084 (opens in your browser)
 ```
+
+(With the macOS app, opening the app does this; the llama-server address and log file are in its Settings.)
+
+That is the whole setup: it records what passes through the tap and explains it live. llama-server can be started
+before or after; the page says what it is waiting for and shows the lines below with your addresses filled in.
+Then point a client at the tap.
 
 **Claude Code** (in another terminal):
 
@@ -69,24 +91,32 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8081 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_MO
 client should send `stream_options: {"include_usage": true}` (OpenCode does); without it kvprof falls back to the
 server log and llama.cpp's `timings`.
 
-Then look at what happened:
+Requests appear in the GUI as they happen. The same from a terminal:
 
 ```sh
-kvprof analyze --upstream http://127.0.0.1:8080 --server-log server.log          # one line per request
-kvprof analyze ... --dump 3                                                      # request 3: sections, rendered prompt with markers
-kvprof serve   --upstream http://127.0.0.1:8080 --server-log server.log          # live GUI at http://127.0.0.1:8084
+kvprof doctor  --server-log server.log          # does the server expose what kvprof needs?
+kvprof analyze --server-log server.log          # one line per request
+kvprof analyze ... --dump 3                     # request 3: sections, rendered prompt with markers
 ```
 
-Settings can also come from the environment: `KVPROF_UPSTREAM`, `KVPROF_TRACE_DIR`, `KVPROF_SERVER_LOG`,
-`KVPROF_SERVER_PID`, `KVPROF_MODEL`, `KVPROF_API_KEY`.
+`--upstream URL` points any command at a llama-server that is not on `http://127.0.0.1:8080`. Settings can also
+come from the environment: `KVPROF_UPSTREAM`, `KVPROF_LISTEN`, `KVPROF_TRACE_DIR`, `KVPROF_SERVER_LOG`,
+`KVPROF_SERVER_PID`, `KVPROF_MODEL`, `KVPROF_API_KEY`, `KVPROF_DATA_DIR`.
+
+**Where traces go.** `--trace-dir` (or `KVPROF_TRACE_DIR`) if you give one; else `./.kvprof/` if the current
+directory has one; else a per-user directory (`~/Library/Application Support/kvprof/traces` on macOS,
+`~/.local/share/kvprof/traces` on Linux) with one subdirectory per model, because an analysis only holds for the
+model that served the request. `kvprof tap` on its own cannot ask which model is loaded and always records into
+`./.kvprof/`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `kvprof tap` | A passive byte relay between client and server. Bytes pass through unchanged (same framing, headers, chunking); POSTs to `/v1/messages` and `/v1/chat/completions` are written to the trace directory as one JSON file per request. A client disconnect closes the upstream connection, so the server cancels exactly as it would without the tap. |
+| `kvprof start` | `tap` and `serve` in one process, and the GUI opened for you. Starts whether or not llama-server is up, attaches when it answers, and follows it when it comes back with another model. A second `kvprof start` finds the first and opens its GUI. `--no-open`, `--listen`, `--port`. |
+| `kvprof tap` | Only the recorder. A passive byte relay between client and server. Bytes pass through unchanged (same framing, headers, chunking); POSTs to `/v1/messages` and `/v1/chat/completions` are written to the trace directory as one JSON file per request. A client disconnect closes the upstream connection, so the server cancels exactly as it would without the tap. |
 | `kvprof analyze` | Renders, tokenizes, sections, diffs and classifies every recorded request; pairs each with its server-log task. Results are cached next to the traces. `--json`, `--last N`, `--dump N`. |
-| `kvprof serve` | The same, live, in a browser: overview, a timeline with one lane per slot, the request list grouped by conversation, and per request the token budget by section, the diff against the closest earlier prompt, and the exact tokens. |
+| `kvprof serve` | Only the GUI, over traces already recorded: overview, a timeline with one lane per slot, the request list grouped by conversation, and per request the token budget by section, the diff against the closest earlier prompt, and the exact tokens. |
 | `kvprof doctor` | Checks `/props` (build, slots, context size, chat template), `/tokenize` with pieces, `/apply-template`, `/v1/models`, `count_tokens` against render + tokenize, and with `--server-log` that the log format still parses. |
 | `kvprof calibrate` | Re-derives the few undocumented details of llama-server's Anthropic → OpenAI conversion (runs automatically on first use per model). |
 
@@ -115,9 +145,9 @@ hybrid/recurrent models reuse only end-extending prompts.
 
 **Traces contain the full prompts**: your system prompt, tool definitions, every message, file contents the
 agent read, and anything you pasted. Credentials headers (`authorization`, `x-api-key`, `cookie`) are dropped
-before writing, but the bodies are stored verbatim. Keep the trace directory (`./.kvprof/` by default) out of
-version control: add `.kvprof/` to your `.gitignore`, and do not share traces you would not share the
-conversation itself for.
+before writing, but the bodies are stored verbatim. If you record into a project (`./.kvprof/`), keep it out of
+version control: add `.kvprof/` to your `.gitignore`. Do not share traces you would not share the conversation
+itself for. Nothing is deleted automatically.
 
 ## Scope: llama.cpp only (for now)
 

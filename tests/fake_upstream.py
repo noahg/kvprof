@@ -141,11 +141,12 @@ RENDERERS = {"chatml": (render_chatml, CHATML_TEMPLATE), "llama3": (render_llama
 # ----------------------------------------------------------------------------- server
 
 class FakeUpstream:
-    def __init__(self, log_path, template="chatml", n_slots=2, n_ctx=8192):
+    def __init__(self, log_path, template="chatml", n_slots=2, n_ctx=8192, port=0):
         self.render, self.chat_template = RENDERERS[template]
         self.template = template
         self.log_path = log_path
         self.n_slots, self.n_ctx = n_slots, n_ctx
+        self.model_path = "/models/test-model.gguf"
         self.t0 = time.time()
         self.lock = threading.Lock()
         self.slots = [{"ids": [], "t_last": -1} for _ in range(n_slots)]
@@ -168,7 +169,7 @@ class FakeUpstream:
                 n = int(self.headers.get("content-length") or 0)
                 fake.handle(self, "POST", json.loads(self.rfile.read(n) or b"{}"))
 
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}"
@@ -194,7 +195,7 @@ class FakeUpstream:
 
     # -- helpers
     def props(self):
-        return {"total_slots": self.n_slots, "model_alias": "test-model", "model_path": "/models/test-model.gguf",
+        return {"total_slots": self.n_slots, "model_alias": "test-model", "model_path": self.model_path,
                 "build_info": "b10909-test", "chat_template": self.chat_template,
                 "default_generation_settings": {"n_ctx": self.n_ctx}}
 

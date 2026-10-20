@@ -32,6 +32,12 @@ dev = ["pytest"]
 [project.scripts]
 kvprof = "kvprof.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/noahg/kvprof"
+Repository = "https://github.com/noahg/kvprof"
+Changelog = "https://github.com/noahg/kvprof/blob/main/CHANGELOG.md"
+Issues = "https://github.com/noahg/kvprof/issues"
+
 [tool.hatch.version]
 path = "src/kvprof/__init__.py"
 

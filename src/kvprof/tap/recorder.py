@@ -25,12 +25,27 @@ _normalizer = LlamaCppUsageNormalizer()
 class TapContext:
     """State shared by every connection of one tap: output dir, record paths, the request counter."""
 
-    def __init__(self, out_dir, record_paths=None, quiet=False):
+    def __init__(self, out_dir, record_paths=None, quiet=False, locate=None):
         self.out_dir = out_dir
         self.record_paths = set(record_paths or RECORD_PATHS)
         self.quiet = quiet
+        self.locate = locate   # () -> directory for a new connection, or None to stay (`start`, per-model roots)
         self._seq = itertools.count(self._next_seq(out_dir))
         self._lock = threading.Lock()
+
+    def connection_dir(self):
+        """Where a connection that starts now records."""
+        if self.locate:
+            try:
+                d = self.locate()
+            except Exception:
+                d = None
+            with self._lock:
+                if d and d != self.out_dir:
+                    os.makedirs(d, exist_ok=True)
+                    self.out_dir = d
+                    self._seq = itertools.count(self._next_seq(d))
+        return self.out_dir
 
     @staticmethod
     def _next_seq(out_dir):
@@ -54,7 +69,7 @@ class TapContext:
 class Recorder:
     def __init__(self, conn_id, ctx):
         self.conn_id, self.ctx = conn_id, ctx
-        self.out_dir, self.quiet = ctx.out_dir, ctx.quiet
+        self.out_dir, self.quiet = ctx.connection_dir(), ctx.quiet
         self.lock = threading.Lock()
         self.disabled = False
         self.pending = deque()
