@@ -142,13 +142,36 @@ jobs:
           cat SHA256SUMS
           echo "sha256_arm64=$(sha256sum kvprof-*-macos-arm64.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "sha256_x86_64=$(sha256sum kvprof-*-macos-x86_64.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Release notes
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          {
+            cat <<EOF
+          ## Which download?
+
+          | You have | Take |
+          |---|---|
+          | Mac with Apple Silicon (M1 or later) | \`kvprof-$v-macos-arm64.dmg\` |
+          | Mac with an Intel CPU | \`kvprof-$v-macos-x86_64.dmg\` |
+          | Command line, macOS or Linux, no Python needed | \`curl -LsSf https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh \| sh\` (picks the right build) |
+          | Python 3.11+ | \`uvx kvprof start\`, \`uv tool install kvprof\` or \`pipx install kvprof\` |
+
+          Each disk image is built for one architecture; on an Apple Silicon Mac the Intel one runs under Rosetta and macOS warns about it. \`SHA256SUMS\` has the digests of every file.
+
+          ## Changes
+
+          EOF
+            # this version's CHANGELOG section (empty for a tag the changelog does not know yet)
+            awk -v v="$v" '$0 ~ "^## " v "( |$)" {f=1; next} /^## /{f=0} f' CHANGELOG.md
+          } > notes.md
+          cat notes.md
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           flags=""
           case "$GITHUB_REF_NAME" in *rc*) flags="--draft --prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" $flags --title "kvprof ${GITHUB_REF_NAME#v}" --generate-notes assets/*
+          gh release create "$GITHUB_REF_NAME" $flags --title "kvprof ${GITHUB_REF_NAME#v}" --notes-file notes.md assets/*
 
   homebrew:
     needs: github-release
