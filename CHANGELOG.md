@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-10-20)
 
 - `kvprof start`: the tap and the GUI in one process, with the GUI opened in the browser. It starts whether or not
   llama-server is up, attaches the analyzer when the server answers, re-attaches when it comes back with another
